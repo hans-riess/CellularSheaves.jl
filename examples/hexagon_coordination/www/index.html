@@ -5,41 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hexagon Coordination Sheaf</title>
 <style>
-  /* Georgia Tech brand palette (brand.gatech.edu/our-look/colors). Navy Blue, Tech Gold
-     and White are primary; Gray Matter, Pi Mile, Diploma and Buzz Gold secondary. The
-     tertiary accents -- Olympic Teal, New Horizon, Impact Purple -- are held to thin
-     construction lines, in keeping with their "no more than 10% of a design" guidance. */
-  :root {
-    --bg: #F9F6E5;        /* Diploma */
-    --panel: #FFFFFF;     /* White */
-    --ink: #003057;       /* Navy Blue */
-    --muted: #54585A;     /* Gray Matter */
-    --line: #D6DBD4;      /* Pi Mile */
-    --agent: #003057;     /* Navy Blue */
-    --target: #EAAA00;    /* Buzz Gold */
-    --bisector: #008C95;  /* Olympic Teal */
-    --observer: #E04F39;  /* New Horizon */
-    --full: #5F249F;      /* Impact Purple */
-    --ghost: #B3A369;     /* Tech Gold */
-  }
-  /* GT publishes no dark palette, so the marks lighten far enough to hold contrast on a
-     deep-navy ground while keeping each hue recognisably its brand colour.
+  /* Georgia Tech brand palette (brand.gatech.edu/our-look/colors), one mode only.
+     Navy Blue is the ground and Tech Gold is the structure -- the pairing the institute
+     is actually known for. White is reserved for exactly one thing, the target, so the
+     element you steer is the only pure white on the page.
 
-     Three states, so the in-page toggle can override the system in both directions: no
-     `data-theme` follows `prefers-color-scheme`, `data-theme="light"` pins light even on a
-     dark system, and `data-theme="dark"` pins dark even on a light one. The block is
-     spelled twice because one copy has to sit inside the media query. */
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #0A1622; --panel: #12222F; --ink: #F9F6E5; --muted: #9BA6AD;
-      --line: #24384A; --agent: #4E7FD1; --target: #FFCD00;
-      --bisector: #64CCC9; --observer: #E86A55; --full: #9B6FD4; --ghost: #B3A369;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #0A1622; --panel: #12222F; --ink: #F9F6E5; --muted: #9BA6AD;
-    --line: #24384A; --agent: #4E7FD1; --target: #FFCD00;
-    --bisector: #64CCC9; --observer: #E86A55; --full: #9B6FD4; --ghost: #B3A369;
+     The two tertiary accents earn their place by being *stateful*: Electric Blue appears
+     only on an agent at full rank, New Horizon only when something is undetermined. They
+     are absent from the default view entirely, which keeps them well inside the "no more
+     than 10% of a design, subordinate to primary and secondary" guidance. */
+  :root {
+    color-scheme: dark;
+    --bg: #001B31;        /* Navy Blue, deepened for ground */
+    --panel: #003057;     /* Navy Blue */
+    --ink: #FFFFFF;       /* White */
+    --muted: #D6DBD4;     /* Pi Mile */
+    --heading: #B3A369;   /* Tech Gold */
+    --line: #0E4571;      /* Navy Blue, lifted for borders */
+    --agent: #B3A369;     /* Tech Gold -- agents and consensus edges */
+    --target: #FFFFFF;    /* White -- the one thing you drive */
+    --bisector: #D6DBD4;  /* Pi Mile -- quiet construction line */
+    --observer: #EAAA00;  /* Buzz Gold -- the single reading a rank-1 agent takes */
+    --full: #64CCC9;      /* Electric Blue -- a rank-2 agent's full sight line */
+    --warn: #E04F39;      /* New Horizon -- undetermined directions, and cutting an edge */
+    --ghost: #D6DBD4;     /* Pi Mile */
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -52,16 +41,7 @@
 
   .stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 10px; }
   .masthead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-  #theme {
-    margin-left: auto; flex: none; align-self: center; cursor: pointer;
-    background: var(--panel); color: var(--muted); border: 1px solid var(--line);
-    border-radius: 6px; padding: 4px 10px; font: inherit; font-size: 12px;
-    white-space: nowrap;
-  }
-  #theme:hover { color: var(--ink); }
   h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; white-space: nowrap; }
-  /* Small basis so the lede shares the masthead row rather than pushing the theme
-     button onto one of its own. */
   .lede { margin: 0; color: var(--muted); font-size: 13px; min-width: 0; flex: 1 1 240px; }
 
   .board {
@@ -81,12 +61,12 @@
   .cell { background: var(--panel); padding: 7px 11px; }
   .cell .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
   .cell .v { font-size: 15px; font-variant-numeric: tabular-nums; margin-top: 1px; }
-  .cell .v.warn { color: var(--observer); }
+  .cell .v.warn { color: var(--warn); }
 
   .sidebar { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
   .card h2 { font-size: 12px; margin: 0 0 8px; text-transform: uppercase;
-             letter-spacing: 0.05em; color: var(--muted); font-weight: 600; }
+             letter-spacing: 0.05em; color: var(--heading); font-weight: 600; }
   .card p { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
   .card p:last-child { margin-bottom: 0; }
   dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; font-size: 13px; }
@@ -99,7 +79,7 @@
   ul.legend li { color: var(--muted); margin-bottom: 5px; }
   ul.legend li:last-child { margin-bottom: 0; }
   #status { color: var(--muted); font-size: 12.5px; }
-  #status.bad { color: var(--observer); }
+  #status.bad { color: var(--warn); }
 
   @media (max-width: 900px) {
     html, body { height: auto; }
@@ -118,7 +98,6 @@
       angle bisector, or the position in full. A harmonic extension fuses whatever readings
       exist and propagates the answer to the agents that see nothing.
     </p>
-    <button id="theme" type="button" title="Cycle theme (T)">◐ system</button>
   </div>
 
   <div class="board">
@@ -144,7 +123,6 @@
       <dt>0</dt><dd>all to rank 0 (again to restore)</dd>
       <dt>[ ]</dt><dd>agent gain down / up</dd>
       <dt>F</dt><dd>feedforward 0 → ½ → 1</dd>
-      <dt>T</dt><dd>theme: system → light → dark</dd>
       <dt>G</dt><dd>show / hide the reference q*</dd>
       <dt>E</dt><dd>restore the ring wiring</dd>
       <dt>R</dt><dd>record the target path</dd>
@@ -166,6 +144,7 @@
       <li><span class="swatch" style="background:var(--observer)"></span>what a rank-1 agent sees</li>
       <li><span class="swatch" style="background:var(--full)"></span>full sight line — a rank-2 agent</li>
       <li><span class="swatch" style="background:var(--ghost)"></span>harmonic reference q* — hidden, press <b>G</b></li>
+      <li><span class="swatch" style="background:var(--warn)"></span>an undetermined direction</li>
     </ul>
   </div>
 
@@ -214,32 +193,9 @@ const out = {
   rec: document.getElementById("rec"),
 };
 
-// Live declaration: re-reading a token after the theme changes yields the new value, so
-// the canvas needs only a repaint, not a rebuild.
 const css = getComputedStyle(document.documentElement);
 const color = (name) => css.getPropertyValue(name).trim();
 
-// ---- theme ---------------------------------------------------------------------------
-// Three states rather than two, so the choice can override a dark system as well as a
-// light one. "system" removes the attribute and lets prefers-color-scheme decide.
-const THEMES = ["system", "light", "dark"];
-const THEME_LABEL = { system: "◐ system", light: "☀ light", dark: "☾ dark" };
-const themeButton = document.getElementById("theme");
-
-function applyTheme(theme) {
-  if (theme === "system") document.documentElement.removeAttribute("data-theme");
-  else document.documentElement.setAttribute("data-theme", theme);
-  themeButton.textContent = THEME_LABEL[theme];
-  try { localStorage.setItem("hexagon-theme", theme); } catch (e) { /* private mode */ }
-  if (frame) render(frame);
-}
-
-function cycleTheme() {
-  const current = document.documentElement.getAttribute("data-theme") || "system";
-  applyTheme(THEMES[(THEMES.indexOf(current) + 1) % THEMES.length]);
-}
-
-themeButton.addEventListener("click", cycleTheme);
 
 let frame = null;
 let trail = [];
@@ -306,8 +262,6 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "Digit0") { send({ action: "ranks_all" }); return; }
   if (event.code === "KeyG") { send({ action: "ghosts" }); return; }
   if (event.code === "KeyE") { send({ action: "reset_edges" }); return; }
-  // Theme is a browser-side concern; the backend never hears about it.
-  if (event.code === "KeyT") { cycleTheme(); return; }
 
   const digit = /^Digit([1-6])$/.exec(event.code);
   if (digit) send({ action: "rank", agent: Number(digit[1]) });
@@ -356,9 +310,14 @@ function pointerWorld(event) {
   return [(px - canvas.width / 2) / scale, (canvas.height / 2 - py) / scale];
 }
 
+// Grab radius around an agent. This has to stay well under half an edge length: a regular
+// hexagon's side equals its circumradius, so a reach of 0.5 would have the two endpoint
+// discs meet in the middle and leave no part of any ring edge clickable at all. At 0.16 the
+// grab zone is still about four times the drawn marker, and the middle ~70% of each edge
+// stays free for cutting.
 function agentAt(world) {
   if (!frame || !world) return null;
-  const reach = 0.5 * frame.radius;
+  const reach = 0.16 * frame.radius;
   let best = null, bestDistance = reach;
   frame.agents.forEach((p, i) => {
     const distance = Math.hypot(p[0] - world[0], p[1] - world[1]);
@@ -369,7 +328,7 @@ function agentAt(world) {
 
 function edgeAt(world) {
   if (!frame || !world) return null;
-  const reach = 0.16 * frame.radius;
+  const reach = 0.13 * frame.radius;
   let best = null, bestDistance = reach;
   frame.edges.forEach(([a, b], k) => {
     const p = frame.agents[a - 1], q = frame.agents[b - 1];
@@ -469,7 +428,7 @@ function render(state) {
       const reach = 0.42 * state.arena[0];
       line(toPixels([centre[0] - unit[0] * reach, centre[1] - unit[1] * reach]),
            toPixels([centre[0] + unit[0] * reach, centre[1] + unit[1] * reach]),
-           color("--observer"), 0.070 * u, []);
+           color("--warn"), 0.070 * u, []);
     }
     ctx.restore();
   }
@@ -481,9 +440,14 @@ function render(state) {
     const d = state.directions[k];
     const anchor = state.agents[agent - 1];
     const reach = 1.4 * state.arena[0];
+    // Held well back: these are construction lines, and at full strength Pi Mile competes
+    // with the white target for attention.
+    ctx.save();
+    ctx.globalAlpha = 0.4;
     line(toPixels([anchor[0] - d[0] * reach, anchor[1] - d[1] * reach]),
          toPixels([anchor[0] + d[0] * reach, anchor[1] + d[1] * reach]),
          color("--bisector"), 0.0097 * u, [0.046 * u, 0.039 * u]);
+    ctx.restore();
   });
 
   if (trail.length > 1) {
@@ -505,7 +469,7 @@ function render(state) {
   state.edges.forEach(([a, b], k) => {
     const hot = hoverEdge === k;
     line(toPixels(state.agents[a - 1]), toPixels(state.agents[b - 1]),
-         hot ? color("--observer") : color("--agent"), (hot ? 0.032 : 0.0155) * u);
+         hot ? color("--warn") : color("--agent"), (hot ? 0.032 : 0.0155) * u);
   });
 
   // An edge being dragged into existence.
@@ -578,11 +542,6 @@ function render(state) {
   out.rec.textContent = state.recording ? `on — ${state.samples} samples` : "off";
 }
 
-try {
-  applyTheme(localStorage.getItem("hexagon-theme") || "system");
-} catch (e) {
-  applyTheme("system");
-}
 fitCanvas();
 </script>
 </body>
