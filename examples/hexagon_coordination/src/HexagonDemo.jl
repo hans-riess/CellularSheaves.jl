@@ -103,7 +103,10 @@ end
 _regular_offsets(n, radius) =
     [Float64(radius) .* [cos((i - 1) * 2π / n), sin((i - 1) * 2π / n)] for i in 1:n]
 
-_cycle_edges(n) = n >= 3 ? [(i, i % n + 1) for i in 1:n] : [(i, i + 1) for i in 1:(n - 1)]
+# Normalised on the way in. The wrap-around edge is built as (n, 1), and every consumer
+# that looks an edge up normalises first, so leaving it unordered made exactly one edge of
+# the ring -- and only that one -- impossible to cut.
+_cycle_edges(n) = n >= 3 ? [_normalise(i, i % n + 1) for i in 1:n] : [_normalise(i, i + 1) for i in 1:(n - 1)]
 
 _normalise(a, b) = (min(Int(a), Int(b)), max(Int(a), Int(b)))
 
@@ -162,7 +165,7 @@ function connect_agents!(state::DemoState, a::Integer, b::Integer)
     n = n_agents(state)
     (1 <= a <= n && 1 <= b <= n && a != b) || return state
     edge = _normalise(a, b)
-    edge in state.edges && return state
+    any(e -> _normalise(e...) == edge, state.edges) && return state
     push!(state.edges, edge)
     return _rebuild!(state)
 end
@@ -179,7 +182,7 @@ columns.
 """
 function disconnect_agents!(state::DemoState, a::Integer, b::Integer)
     edge = _normalise(a, b)
-    index = findfirst(==(edge), state.edges)
+    index = findfirst(e -> _normalise(e...) == edge, state.edges)
     index === nothing && return state
     deleteat!(state.edges, index)
     return _rebuild!(state)
