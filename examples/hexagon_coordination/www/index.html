@@ -267,6 +267,8 @@ let dragFrom = null;      // agent index a drag started on, 1-based
 let dragPoint = null;     // where the pointer is now, in world units
 let hoverEdge = null;     // index into state.edges, for highlight + cursor feedback
 let pressHandled = false; // the press already did its job; pointerup must not act again
+let pressAt = null;       // where the press landed, in CSS pixels, to tell a click from a drag
+const DRAG_SLOP = 5;      // CSS px of movement before a press counts as a drag
 
 // Pointer position in world units. The backing store is in device pixels while the event
 // is in CSS pixels, so the ratio between them has to come out.
@@ -315,6 +317,7 @@ canvas.addEventListener("pointerdown", (event) => {
   const world = pointerWorld(event);
   const agent = agentAt(world);
   pressHandled = false;
+  pressAt = [event.clientX, event.clientY];
   if (agent !== null) {
     // Without this the release would fall through to the edge/board logic below and, since
     // an agent sits on the end of its own edges, immediately cut one of them too.
@@ -345,15 +348,26 @@ canvas.addEventListener("pointermove", (event) => {
 canvas.addEventListener("pointerup", (event) => {
   if (pressHandled) { pressHandled = false; return; }
   const world = pointerWorld(event);
+  // Click or drag is decided by whether the pointer actually moved, not by what happened to
+  // be under it when pressed. Agents are freely placed, so one can sit right on top of
+  // somebody else's edge -- as agent 2 can end up doing to edge 1-6 -- and if merely
+  // pressing near an agent claimed the gesture, that edge would be uncuttable through no
+  // fault of the user's aim.
+  const moved = pressAt !== null &&
+    Math.hypot(event.clientX - pressAt[0], event.clientY - pressAt[1]) > DRAG_SLOP;
   if (dragFrom !== null) {
+    const from = dragFrom;
     const landed = agentAt(world);
-    if (landed !== null && landed !== dragFrom) {
-      send({ action: "connect", from: dragFrom, to: landed });
-    }
     dragFrom = null;
     dragPoint = null;
     canvas.style.cursor = "default";
-    return;
+    if (moved) {
+      if (landed !== null && landed !== from) {
+        send({ action: "connect", from, to: landed });
+      }
+      return;
+    }
+    // Stationary press on an agent: fall through and treat it as a click.
   }
   // A plain click cuts an edge, or drops a new agent on empty board.
   const k = edgeAt(world);
@@ -400,17 +414,16 @@ function render(state) {
   const u = toPixels.scale * state.radius;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  const count = state.agents.length || 1;
-  const centre = state.reference.reduce((acc, p) => [acc[0] + p[0] / count, acc[1] + p[1] / count], [0, 0]);
+  // Each bar is a translation the formation can make for free, drawn through the centroid
+  // of the agents it actually moves. Modes that are not translations get no bar -- see
+  // `_translation_bars` in HexagonDemo.jl.
   if (state.null_directions.length > 0) {
     ctx.save();
     ctx.globalAlpha = 0.3;
-    for (const direction of state.null_directions) {
-      const len = Math.hypot(direction[0], direction[1]) || 1;
-      const unit = [direction[0] / len, direction[1] / len];
+    for (const bar of state.null_directions) {
       const reach = 0.42 * state.arena[0];
-      line(toPixels([centre[0] - unit[0] * reach, centre[1] - unit[1] * reach]),
-           toPixels([centre[0] + unit[0] * reach, centre[1] + unit[1] * reach]),
+      line(toPixels([bar.at[0] - bar.dir[0] * reach, bar.at[1] - bar.dir[1] * reach]),
+           toPixels([bar.at[0] + bar.dir[0] * reach, bar.at[1] + bar.dir[1] * reach]),
            color("--warn"), 0.070 * u, []);
     }
     ctx.restore();
@@ -517,8 +530,8 @@ function render(state) {
 
   out.obs.textContent = state.ranks.join("·");
   out.readings.textContent = String(state.scalar_readings);
-  out.nullity.textContent = String(state.null_directions.length);
-  out.nullity.className = state.null_directions.length > 0 ? "v warn" : "v";
+  out.nullity.textContent = String(state.undetermined);
+  out.nullity.className = state.undetermined > 0 ? "v warn" : "v";
   out.lag.textContent = Number(state.lag).toFixed(2);
   out.gains.textContent = `${Number(state.gain).toFixed(1)} / ${Number(state.feedforward)}`;
   out.energy.textContent = Number(state.energy).toExponential(2);

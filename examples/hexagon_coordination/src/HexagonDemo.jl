@@ -482,7 +482,8 @@ function snapshot(state::DemoState)
         directions = [state.directions[i] for i in observers],
         projections = projections,
         scalar_readings = sum(state.ranks),
-        null_directions = [state.null_basis[1:2, k] for k in 1:size(state.null_basis, 2)],
+        null_directions = _translation_bars(state),
+        undetermined = size(state.null_basis, 2),
         gain = round(state.gain; digits=2),
         feedforward = state.feedforward,
         lag = isempty(state.positions) ? 0.0 :
@@ -491,6 +492,36 @@ function snapshot(state::DemoState)
         recording = state.recording,
         samples = length(state.track),
     )
+end
+
+# A straight bar through a centroid honestly depicts one thing: a *translation* that costs
+# no energy. A null space can hold other modes too -- a uniform dilation, or two halves of a
+# split fleet drifting relative to one another -- and drawing those as a bar would claim
+# something false. So a mode earns a bar only when the agents it moves all move together,
+# and the bar is drawn through the centroid of just those agents.
+#
+# When the null space is large its basis is an arbitrary orthonormal mixture, so typically
+# no single column is a clean translation and nothing is drawn. That is the honest outcome:
+# the readout still reports how many directions are free, and declines to draw lines it
+# cannot justify.
+function _translation_bars(state::DemoState)
+    n = n_agents(state)
+    bars = NamedTuple{(:at, :dir),Tuple{Vector{Float64},Vector{Float64}}}[]
+    (n == 0 || size(state.null_basis, 2) == 0) && return bars
+    for k in 1:size(state.null_basis, 2)
+        v = state.null_basis[:, k]
+        parts = [v[D*(i-1)+1:D*(i-1)+2] for i in 1:n]
+        scale = maximum(norm, parts)
+        scale < 1e-9 && continue
+        moving = [i for i in 1:n if norm(parts[i]) > 0.05 * scale]
+        isempty(moving) && continue
+        head = parts[first(moving)]
+        all(norm(parts[i] - head) < 1e-6 for i in moving) || continue
+        all(abs(v[D*i]) < 1e-6 for i in 1:n) || continue
+        at = sum(state.positions[i] for i in moving) ./ length(moving)
+        push!(bars, (at = at, dir = head ./ norm(head)))
+    end
+    return bars
 end
 
 # Sheaf Dirichlet energy of the *actual* agent configuration -- how far the fleet is from
