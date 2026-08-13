@@ -146,9 +146,72 @@ using LinearAlgebra
         @test_throws Exception build_projection_escort_ring(2, 3, 0.35)
         @test_throws Exception build_projection_escort_ring(6, 7, 0.0)
         @test_throws Exception build_projection_escort_ring(6, 7, 0.35; D=2)
-        @test_throws Exception build_projection_escort_ring(6, 7, 0.35; observers=Int[])
         @test_throws Exception build_projection_escort_ring(6, 7, 0.35; observers=[7])
         @test_throws Exception build_projection_escort_ring(6, 3, 0.35)
+        # Rank 2 is full observation when D = 3; rank 3 has no meaning there.
+        @test_throws Exception build_projection_escort_ring(6, 7, 0.35; ranks=[3, 0, 0, 0, 0, 0])
+        @test_throws Exception build_projection_escort_ring(6, 7, 0.35; ranks=[1, 0, 1])
+        @test_throws Exception build_projection_escort_ring(6, 7, 0.35; observers=[1], ranks=zeros(Int, 6))
+    end
+
+    @testset "build_projection_escort_ring — observation ranks" begin
+        R = 0.35
+        boundary = Dict(7 => [0.55, -0.30, 1.0])
+        nullity(s) = size(harmonic_extension(s, boundary)[2], 2)
+
+        # `observers` is shorthand for "rank 1 here, rank 0 elsewhere".
+        @test build_projection_escort_ring(6, 7, R; observers=[1, 3, 5]) ==
+              build_projection_escort_ring(6, 7, R; ranks=[1, 0, 1, 0, 1, 0])
+
+        # Rank 0 removes the edge; rank 1 gives a 2-dimensional stalk; rank 2 (= D-1) gives 3.
+        mixed = build_projection_escort_ring(6, 7, R; ranks=[2, 0, 1, 0, 1, 0])
+        @test !has_edge(mixed.underlying_graph, 2, 7)
+        @test mixed.edge_stalks[UnorderedPair(1, 7)] == 3
+        @test mixed.edge_stalks[UnorderedPair(3, 7)] == 2
+        # Every observation edge keeps a gauge row, at every rank.
+        @test mixed.restriction_maps[1=>7][end, :] == [0.0, 0.0, 1.0]
+        @test mixed.restriction_maps[3=>7][end, :] == [0.0, 0.0, 1.0]
+
+        # Rank D-1 is exactly the identity pin `build_escort_ring` already used.
+        full = build_projection_escort_ring(6, 7, R; ranks=fill(2, 6))
+        escort = build_escort_ring(6, 7, R; D=3)
+        @test full == escort
+
+        # Information is a span, not a count: two scalars determine the formation when read
+        # along independent directions and fail to when read along antiparallel ones.
+        @test nullity(build_projection_escort_ring(6, 7, R; ranks=[2, 0, 0, 0, 0, 0])) == 0
+        @test nullity(build_projection_escort_ring(6, 7, R; ranks=[1, 0, 0, 1, 0, 0])) == 1
+        @test nullity(build_projection_escort_ring(6, 7, R; ranks=[1, 0, 0, 0, 0, 0])) == 1
+
+        # Mixed ranks still recover the exact escort formation.
+        d = [R .* [cos(2π * (i - 1) / 6), sin(2π * (i - 1) / 6)] for i in 1:6]
+        x, nb = harmonic_extension(mixed, boundary)
+        @test size(nb, 2) == 0
+        for i in 1:6
+            @test Vector(x)[3(i-1)+1:3(i-1)+2] ≈ [0.55, -0.30] .+ d[i] atol=1e-10
+        end
+    end
+
+    @testset "build_projection_escort_ring — every agent at rank 0" begin
+        R = 0.35
+        # A ring that observes nothing is a legitimate sheaf, not an error: the target
+        # vertex is simply isolated and the formation floats free.
+        s = build_projection_escort_ring(6, 7, R; ranks=zeros(Int, 6))
+        @test ne(s.underlying_graph) == 6
+        @test degree(s.underlying_graph, 7) == 0
+
+        x, null_basis = harmonic_extension(s, Dict(7 => [0.55, -0.30, 1.0]))
+        # Two translations plus the dilation the target is no longer there to pin.
+        @test size(null_basis, 2) == 3
+        # The returned representative is the collapsed formation, which is why a caller
+        # wanting a usable configuration must pick a different point of the solution set.
+        @test norm(Vector(x)[1:18]) < 1e-10
+
+        # The exact escort formation is nonetheless in the solution set.
+        d = [R .* [cos(2π * (i - 1) / 6), sin(2π * (i - 1) / 6)] for i in 1:6]
+        exact = vcat([vcat([0.55, -0.30] .+ d[i], 1.0) for i in 1:6]...)
+        N = Matrix(qr(null_basis[1:18, :]).Q)[:, 1:3]
+        @test norm(exact - N * (N' * exact)) < 1e-9
     end
 
     @testset "build_projection_escort_ring — the escort formation is a zero-energy section" begin

@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hexagon Coordination Sheaf</title>
 <style>
   :root {
@@ -13,104 +14,148 @@
     --agent: #2a6fb5;
     --observer: #c8442c;
     --bisector: #3d9970;
+    --full: #8250c8;
     --ghost: #a8a8a8;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #16181c; --panel: #1e2126; --ink: #e8e6e3; --muted: #9a9a9a;
       --line: #343941; --agent: #62a8e8; --observer: #f0765c;
-      --bisector: #63c295; --ghost: #6e7681;
+      --bisector: #63c295; --full: #a982e8; --ghost: #6e7681;
     }
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    display: flex; flex-direction: column; align-items: center; padding: 20px 16px 40px;
+    display: grid; grid-template-columns: minmax(0, 1fr) 330px;
+    gap: 14px; padding: 14px;
   }
-  h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; letter-spacing: -0.01em; }
-  p.lede { margin: 0 0 18px; color: var(--muted); max-width: 62ch; text-align: center; }
-  .stage {
-    width: 100%; max-width: 940px; background: var(--panel);
+
+  .stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 10px; }
+  .masthead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; white-space: nowrap; }
+  .lede { margin: 0; color: var(--muted); font-size: 13px; min-width: 0; }
+
+  .board {
+    flex: 1; min-height: 0; background: var(--panel);
     border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+    display: flex; flex-direction: column;
   }
-  canvas { display: block; width: 100%; height: auto; }
+  .canvaswrap { flex: 1; min-height: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+
   .readout {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 1px; background: var(--line); border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+    gap: 1px; background: var(--line); border-top: 1px solid var(--line); flex: none;
   }
-  .cell { background: var(--panel); padding: 9px 12px; }
-  .cell .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  /* No `grid-column` spanning here: a cell that spans every track would keep `auto-fit`
+     from collapsing the unused ones, leaving the grid's own background on show. */
+  .cell { background: var(--panel); padding: 7px 11px; }
+  .cell .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
   .cell .v { font-size: 15px; font-variant-numeric: tabular-nums; margin-top: 1px; }
   .cell .v.warn { color: var(--observer); }
-  .panels { display: flex; flex-wrap: wrap; gap: 14px; max-width: 940px; width: 100%; margin-top: 18px; }
-  .card {
-    flex: 1 1 280px; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 10px; padding: 13px 15px;
-  }
-  .card h2 { font-size: 13px; margin: 0 0 8px; text-transform: uppercase;
+
+  .sidebar { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .card h2 { font-size: 12px; margin: 0 0 8px; text-transform: uppercase;
              letter-spacing: 0.05em; color: var(--muted); font-weight: 600; }
-  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
-  dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--observer); white-space: nowrap; }
+  .card p { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+  .card p:last-child { margin-bottom: 0; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; font-size: 13px; }
+  dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+       color: var(--observer); white-space: nowrap; }
   dd { margin: 0; color: var(--muted); }
-  .swatch { display: inline-block; width: 22px; height: 3px; vertical-align: middle; margin-right: 7px; border-radius: 2px; }
-  ul.legend { list-style: none; margin: 0; padding: 0; }
+  .swatch { display: inline-block; width: 20px; height: 3px; vertical-align: middle;
+            margin-right: 7px; border-radius: 2px; }
+  ul.legend { list-style: none; margin: 0; padding: 0; font-size: 13px; }
   ul.legend li { color: var(--muted); margin-bottom: 5px; }
-  #status { margin-top: 14px; color: var(--muted); font-size: 13px; min-height: 20px; }
+  ul.legend li:last-child { margin-bottom: 0; }
+  #status { color: var(--muted); font-size: 12.5px; }
   #status.bad { color: var(--observer); }
+
+  @media (max-width: 900px) {
+    html, body { height: auto; }
+    body { grid-template-columns: 1fr; }
+    .canvaswrap { aspect-ratio: 8 / 5; }
+  }
 </style>
 </head>
 <body>
 
-<h1>Hexagon coordination sheaf</h1>
-<p class="lede">
-  Agents 1, 3 and 5 each measure a single number: the projection of the target onto the angle
-  bisector at their own vertex. Agents 2, 4 and 6 measure nothing. A harmonic extension fuses
-  the readings and propagates them around the ring.
-</p>
-
-<div class="stage">
-  <canvas id="view" width="1880" height="1175"></canvas>
-  <div class="readout">
-    <div class="cell"><div class="k">Observers</div><div class="v" id="obs">1, 3, 5</div></div>
-    <div class="cell"><div class="k">Scalar readings</div><div class="v" id="readings">3</div></div>
-    <div class="cell"><div class="k">Undetermined directions</div><div class="v" id="nullity">0</div></div>
-    <div class="cell"><div class="k">Sheaf energy</div><div class="v" id="energy">0</div></div>
-    <div class="cell"><div class="k">Recording</div><div class="v" id="rec">off</div></div>
+<main class="stage">
+  <div class="masthead">
+    <h1>Hexagon coordination sheaf</h1>
+    <p class="lede">
+      Each agent observes the target at its own <b>rank</b> — nothing, one number along its
+      angle bisector, or the position in full. A harmonic extension fuses whatever readings
+      exist and propagates the answer to the agents that see nothing.
+    </p>
   </div>
-</div>
 
-<div class="panels">
+  <div class="board">
+    <div class="canvaswrap"><canvas id="view"></canvas></div>
+    <div class="readout">
+      <div class="cell"><div class="k">Ranks 1–6</div><div class="v" id="obs">1·0·1·0·1·0</div></div>
+      <div class="cell"><div class="k">Scalar readings</div><div class="v" id="readings">3</div></div>
+      <div class="cell"><div class="k">Undetermined</div><div class="v" id="nullity">0</div></div>
+      <div class="cell"><div class="k">Lag</div><div class="v" id="lag">0.00</div></div>
+      <div class="cell"><div class="k">Gain / feedfwd</div><div class="v" id="gains">2.5 / 0</div></div>
+      <div class="cell"><div class="k">Sheaf energy</div><div class="v" id="energy">0</div></div>
+      <div class="cell"><div class="k">Recording</div><div class="v" id="rec">off</div></div>
+    </div>
+  </div>
+</main>
+
+<aside class="sidebar">
   <div class="card">
     <h2>Controls</h2>
     <dl>
       <dt>← ↑ ↓ → / WASD</dt><dd>drive the target</dd>
-      <dt>1 … 6</dt><dd>toggle an agent's observation</dd>
-      <dt>R</dt><dd>start / stop recording the target path</dd>
+      <dt>1 … 6</dt><dd>cycle rank: none → line → full</dd>
+      <dt>0</dt><dd>all to rank 0 (again to restore)</dd>
+      <dt>[ ]</dt><dd>agent gain down / up</dd>
+      <dt>F</dt><dd>feedforward 0 → ½ → 1</dd>
+      <dt>R</dt><dd>record the target path</dd>
       <dt>enter</dt><dd>save the recording as CSV</dd>
       <dt>space</dt><dd>reset</dd>
     </dl>
   </div>
+
   <div class="card">
     <h2>Legend</h2>
     <ul class="legend">
       <li><span class="swatch" style="background:var(--agent)"></span>ring edges — fixed displacements</li>
-      <li><span class="swatch" style="background:var(--bisector)"></span>bisector line of an observer</li>
-      <li><span class="swatch" style="background:var(--observer)"></span>the projection each observer sees</li>
+      <li><span class="swatch" style="background:var(--bisector)"></span>bisector line — a rank-1 agent</li>
+      <li><span class="swatch" style="background:var(--observer)"></span>what a rank-1 agent sees</li>
+      <li><span class="swatch" style="background:var(--full)"></span>full sight line — a rank-2 agent</li>
       <li><span class="swatch" style="background:var(--ghost)"></span>harmonic reference q*</li>
     </ul>
   </div>
+
   <div class="card">
     <h2>Try this</h2>
-    <p style="margin:0;color:var(--muted)">
-      Press <b>3</b> and <b>5</b> to leave a single observer. The ring drifts along a thick bar —
-      the direction one scalar reading cannot pin — yet the sheaf energy stays at zero. That
-      configuration is a perfectly valid solution; it just isn't the only one.
+    <p>
+      Put <b>one</b> agent at rank 2 and zero the rest: two scalar readings, formation
+      determined. Now instead put agents <b>1 and 4</b> at rank 1 — also two readings, but a
+      thick bar appears. Those vertices are opposite, so their bisectors are antiparallel and
+      the second reading repeats the first.
+    </p>
+    <p>
+      What determines the formation is not how many numbers you read, but whether the
+      directions you read along <b>span</b>.
+    </p>
+    <p>
+      Press <b>0</b> for no tracking at all: the ring keeps its shape and stops following you.
     </p>
   </div>
-</div>
 
-<div id="status">connecting…</div>
+  <div class="card">
+    <h2>Status</h2>
+    <div id="status">connecting…</div>
+  </div>
+</aside>
 
 <script>
 "use strict";
@@ -122,6 +167,8 @@ const out = {
   obs: document.getElementById("obs"),
   readings: document.getElementById("readings"),
   nullity: document.getElementById("nullity"),
+  lag: document.getElementById("lag"),
+  gains: document.getElementById("gains"),
   energy: document.getElementById("energy"),
   rec: document.getElementById("rec"),
 };
@@ -130,7 +177,6 @@ const css = getComputedStyle(document.documentElement);
 const color = (name) => css.getPropertyValue(name).trim();
 
 let frame = null;
-let observers = [1, 2, 3, 4, 5, 6].filter((i) => i % 2 === 1);
 let trail = [];
 const held = new Set();
 
@@ -147,7 +193,7 @@ const wsPort = Number(location.port || 8080) + 1;
 const socket = new WebSocket(`ws://${host}:${wsPort}`);
 
 socket.addEventListener("open", () => {
-  statusEl.textContent = "connected — click the canvas and drive the target";
+  statusEl.textContent = "connected — drive the target with the arrow keys";
   statusEl.classList.remove("bad");
 });
 socket.addEventListener("close", () => {
@@ -156,16 +202,9 @@ socket.addEventListener("close", () => {
 });
 socket.addEventListener("message", (event) => {
   const message = JSON.parse(event.data);
-  if (message.event === "saved") {
-    statusEl.textContent = `saved ${message.path}`;
-    return;
-  }
-  if (message.event === "error") {
-    statusEl.textContent = message.message;
-    return;
-  }
+  if (message.event === "saved") { statusEl.textContent = `saved ${message.path}`; return; }
+  if (message.event === "error") { statusEl.textContent = message.message; return; }
   frame = message;
-  observers = message.observers;
   trail.push(message.target);
   if (trail.length > 420) trail.shift();
   render(message);
@@ -196,17 +235,13 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "KeyR") { send({ action: "record" }); return; }
   // Not "S": that is already WASD's down key.
   if (event.code === "Enter") { send({ action: "save" }); return; }
+  if (event.code === "KeyF") { send({ action: "feedforward" }); return; }
+  if (event.code === "BracketLeft") { send({ action: "gain", factor: 1 / 1.25 }); return; }
+  if (event.code === "BracketRight") { send({ action: "gain", factor: 1.25 }); return; }
+  if (event.code === "Digit0") { send({ action: "ranks_all" }); return; }
 
   const digit = /^Digit([1-6])$/.exec(event.code);
-  if (digit) {
-    const agent = Number(digit[1]);
-    const next = observers.includes(agent)
-      ? observers.filter((i) => i !== agent)
-      : [...observers, agent].sort((a, b) => a - b);
-    // The backend ignores an empty observer set; mirror that here so the UI
-    // never shows a selection the simulation did not accept.
-    if (next.length > 0) send({ action: "observers", observers: next });
-  }
+  if (digit) send({ action: "rank", agent: Number(digit[1]) });
 });
 
 window.addEventListener("keyup", (event) => {
@@ -214,10 +249,24 @@ window.addEventListener("keyup", (event) => {
 });
 window.addEventListener("blur", () => { held.clear(); sendCommand(); });
 
-// World units -> canvas pixels. The arena is centred on the origin.
+// Match the backing store to the element's device pixels so the drawing stays sharp at any
+// window size. `makeTransform` letterboxes the arena inside whatever shape results, so the
+// canvas can be any aspect ratio.
+function fitCanvas() {
+  const box = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(box.width * dpr));
+  canvas.height = Math.max(1, Math.round(box.height * dpr));
+  if (frame) render(frame);
+}
+window.addEventListener("resize", fitCanvas);
+
+// World units -> canvas pixels. The arena is centred on the origin, letterboxed to fit.
 function makeTransform(arena) {
   const scale = Math.min(canvas.width / arena[0], canvas.height / arena[1]);
-  return (p) => [canvas.width / 2 + p[0] * scale, canvas.height / 2 - p[1] * scale];
+  const project = (p) => [canvas.width / 2 + p[0] * scale, canvas.height / 2 - p[1] * scale];
+  project.scale = scale;
+  return project;
 }
 
 function line(a, b, stroke, width, dash = []) {
@@ -241,9 +290,12 @@ function disc(p, radius, fill, stroke = null, width = 2) {
 
 function render(state) {
   const toPixels = makeTransform(state.arena);
+  // Every visual size below is a fraction of `u`, the ring radius measured in pixels, so
+  // the drawing keeps its proportions at any window size or pixel density. An agent marker
+  // is a touch under a tenth of the ring radius.
+  const u = toPixels.scale * state.radius;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Undetermined directions, drawn first so everything else sits on top.
   const centre = state.reference.reduce((acc, p) => [acc[0] + p[0] / 6, acc[1] + p[1] / 6], [0, 0]);
   if (state.null_directions.length > 0) {
     ctx.save();
@@ -254,27 +306,28 @@ function render(state) {
       const reach = 0.42 * state.arena[0];
       line(toPixels([centre[0] - unit[0] * reach, centre[1] - unit[1] * reach]),
            toPixels([centre[0] + unit[0] * reach, centre[1] + unit[1] * reach]),
-           color("--observer"), 18, []);
+           color("--observer"), 0.070 * u, []);
     }
     ctx.restore();
   }
 
-  // Bisector lines of the observing agents.
+  // Bisector lines, drawn only for the rank-1 agents: a rank-2 agent is not confined to a
+  // line, and a rank-0 agent sees nothing to draw.
   state.observers.forEach((agent, k) => {
-    const u = state.directions[k];
+    if (state.ranks[agent - 1] !== 1) return;
+    const d = state.directions[k];
     const anchor = state.agents[agent - 1];
     const reach = 1.4 * state.arena[0];
-    line(toPixels([anchor[0] - u[0] * reach, anchor[1] - u[1] * reach]),
-         toPixels([anchor[0] + u[0] * reach, anchor[1] + u[1] * reach]),
-         color("--bisector"), 2.5, [12, 10]);
+    line(toPixels([anchor[0] - d[0] * reach, anchor[1] - d[1] * reach]),
+         toPixels([anchor[0] + d[0] * reach, anchor[1] + d[1] * reach]),
+         color("--bisector"), 0.0097 * u, [0.046 * u, 0.039 * u]);
   });
 
-  // Target trail.
   if (trail.length > 1) {
     ctx.save();
     ctx.strokeStyle = color("--ink");
     ctx.globalAlpha = 0.22;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 0.0097 * u;
     ctx.beginPath();
     trail.forEach((p, i) => {
       const q = toPixels(p);
@@ -287,40 +340,49 @@ function render(state) {
   // Ring edges: the fixed-displacement constraints.
   for (let i = 0; i < state.agents.length; i++) {
     const j = (i + 1) % state.agents.length;
-    line(toPixels(state.agents[i]), toPixels(state.agents[j]), color("--agent"), 4);
+    line(toPixels(state.agents[i]), toPixels(state.agents[j]), color("--agent"), 0.0155 * u);
   }
 
   // Harmonic reference, as hollow ghosts.
   ctx.save();
   ctx.globalAlpha = 0.75;
-  for (const p of state.reference) disc(toPixels(p), 17, null, color("--ghost"), 3);
+  for (const p of state.reference) disc(toPixels(p), 0.066 * u, null, color("--ghost"), 0.0116 * u);
   ctx.restore();
 
-  // What each observer actually measures: the target's foot on its bisector.
-  state.projections.forEach((foot) => {
-    line(toPixels(state.target), toPixels(foot), color("--observer"), 2.5, [7, 7]);
-    disc(toPixels(foot), 8, color("--observer"));
+  // What each observer actually measures. A rank-1 agent gets the target's foot on its
+  // bisector — one number. A rank-2 agent gets the target itself, drawn as a solid sight
+  // line straight to it.
+  state.observers.forEach((agent, k) => {
+    const rank = state.ranks[agent - 1];
+    if (rank === 1) {
+      const foot = state.projections[k];
+      line(toPixels(state.target), toPixels(foot), color("--observer"), 0.0097 * u, [0.027 * u, 0.027 * u]);
+      disc(toPixels(foot), 0.031 * u, color("--observer"));
+    } else if (rank === 2) {
+      line(toPixels(state.agents[agent - 1]), toPixels(state.target), color("--full"), 0.0097 * u);
+    }
   });
 
-  // Agents. Observers are ringed in the observer colour.
+  // Agents, ringed by rank: rank 1 in the projection colour, rank 2 in the full-sight
+  // colour, rank 0 bare.
   state.agents.forEach((p, i) => {
-    const observing = state.observers.includes(i + 1);
-    disc(toPixels(p), 20, color("--agent"), observing ? color("--observer") : null, 6);
+    const rank = state.ranks[i];
+    const ring = rank === 1 ? color("--observer") : rank === 2 ? color("--full") : null;
+    disc(toPixels(p), 0.077 * u, color("--agent"), ring, 0.023 * u);
     const q = toPixels(p);
     ctx.fillStyle = "#ffffff";
-    ctx.font = "600 22px ui-sans-serif, system-ui, sans-serif";
+    ctx.font = `600 ${0.085 * u}px ui-sans-serif, system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(String(i + 1), q[0], q[1] + 1);
+    ctx.fillText(String(i + 1), q[0], q[1] + 0.004 * u);
   });
 
-  // Target.
   const target = toPixels(state.target);
   ctx.save();
   ctx.fillStyle = color("--ink");
   ctx.beginPath();
   for (let k = 0; k < 10; k++) {
-    const radius = k % 2 === 0 ? 22 : 9;
+    const radius = (k % 2 === 0 ? 0.085 : 0.035) * u;
     const angle = (Math.PI / 5) * k - Math.PI / 2;
     const point = [target[0] + radius * Math.cos(angle), target[1] + radius * Math.sin(angle)];
     k === 0 ? ctx.moveTo(point[0], point[1]) : ctx.lineTo(point[0], point[1]);
@@ -329,13 +391,17 @@ function render(state) {
   ctx.fill();
   ctx.restore();
 
-  out.obs.textContent = state.observers.join(", ");
-  out.readings.textContent = String(state.observers.length);
+  out.obs.textContent = state.ranks.join("·");
+  out.readings.textContent = String(state.scalar_readings);
   out.nullity.textContent = String(state.null_directions.length);
   out.nullity.className = state.null_directions.length > 0 ? "v warn" : "v";
+  out.lag.textContent = Number(state.lag).toFixed(2);
+  out.gains.textContent = `${Number(state.gain).toFixed(1)} / ${Number(state.feedforward)}`;
   out.energy.textContent = Number(state.energy).toExponential(2);
   out.rec.textContent = state.recording ? `on — ${state.samples} samples` : "off";
 }
+
+fitCanvas();
 </script>
 </body>
 </html>

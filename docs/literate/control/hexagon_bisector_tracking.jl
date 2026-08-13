@@ -12,6 +12,12 @@
 # it on purpose — because the way it fails is the best argument for the sheaf-theoretic
 # formulation.
 #
+# Reading one scalar is only the middle setting. Each agent carries an observation **rank**:
+# `0` sees nothing, `1` sees the scalar above, and `D-1` sees the target's position in full,
+# recovering the ordinary escort ring. The section on removing observers works through the
+# whole family, and turns up a pair of configurations that read the same number of scalars
+# and yet do not agree on whether the formation is determined.
+#
 # ## The formation as an affine sheaf
 #
 # Agent `i` sits at angle ``\theta_i = 2\pi(i-1)/6`` and distance ``r`` from the formation
@@ -208,22 +214,36 @@ end
 # Two scalars are enough, provided the two bisectors are independent. Below, every observer
 # subset of the hexagon, scored by the dimension of the resulting null space.
 
-subsets = [[1, 3, 5], [1, 3], [3, 5], [1, 2], [1, 4], [3, 6], [3], [1]]
-for observers in subsets
-    s = build_projection_escort_ring(NA, TV, R; observers = observers)
+# Each agent's observation is graded by a **rank**, which `build_projection_escort_ring`
+# takes per agent: `0` gives it no observation edge at all, `1` the single bisector reading
+# above, and `D-1` the target's position in full — at which point the selector is the
+# identity and the edge is exactly the pin [`build_escort_ring`](@ref) has always used. One
+# construction therefore spans the whole family from blind to fully sighted.
+
+rank_cases = [[1, 0, 1, 0, 1, 0], [2, 0, 0, 0, 0, 0], [1, 0, 0, 1, 0, 0],
+              [1, 0, 1, 0, 0, 0], [1, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [2, 2, 2, 2, 2, 2]]
+for ranks in rank_cases
+    s = build_projection_escort_ring(NA, TV, R; ranks = ranks)
     _, nb = harmonic_extension(s, Dict(TV => [0.55, -0.30, 1.0]))
-    @printf("observers %-10s → %d scalar reading(s), %d undetermined direction(s)\n",
-            string(observers), length(observers), size(nb, 2))
+    @printf("ranks %-20s → %2d scalar reading(s), %d undetermined direction(s)\n",
+            string(ranks), sum(ranks), size(nb, 2))
 end
 
-# Two results there are worth pausing on.
+# The two middle rows are the point of this page.
 #
-# `[1, 4]` and `[3, 6]` are *pairs* of observers that still leave the formation
-# under-determined. Those vertices are diametrically opposite, so their bisectors are
-# antiparallel — the second reading is the first one again, and buys nothing. Counting
-# observers is not the same as counting information, and the sheaf knows the difference.
+# `[2,0,0,0,0,0]` and `[1,0,0,1,0,0]` both read **two scalars**. The first determines the
+# formation; the second does not. Agents 1 and 4 sit at diametrically opposite vertices, so
+# their bisectors are antiparallel and the second reading is the first one again. What
+# decides the question is not how many numbers are read but whether the directions they are
+# read along **span** — and the sheaf knows the difference without being told.
 #
-# A single observer leaves exactly one direction free, and it is the translation
+# The last row is worth noting too: every agent at rank `D-1` reproduces the ordinary escort
+# ring exactly, so nothing here contradicts the existing construction; it generalises it.
+
+@printf("all-rank-2 ring == build_escort_ring : %s\n",
+        build_projection_escort_ring(NA, TV, R; ranks = fill(2, NA)) == build_escort_ring(NA, TV, R; D = 3))
+
+# A single rank-1 observer leaves exactly one direction free, and it is the translation
 # perpendicular to that agent's bisector:
 
 solo = build_projection_escort_ring(NA, TV, R; observers = [3])
@@ -250,6 +270,38 @@ draw_formation(positions_solo, target, [3]; null_basis = null_solo,
 #     `harmonic_extension` returns *a* representative of the solution set together with a
 #     basis for the indeterminate directions. In the rank-deficient case, do not test the
 #     representative itself — test membership in `x_p + null_basis * c`.
+#
+# ## Choosing a point of the solution set
+#
+# A controller cannot steer toward "a family of configurations"; it needs one. Which member
+# to pick is a policy question the sheaf deliberately leaves open, and the natural answer for
+# a *moving* formation is the point of the family **nearest the configuration the agents
+# already hold** — undetermined should mean *stay where you are*, not *jump somewhere
+# arbitrary*:
+#
+# ```math
+# q = x_p + N N^\top (x_\text{current} - x_p), \qquad N \text{ orthonormal}
+# ```
+#
+# The need for this is sharpest with every agent at rank 0. The target vertex is then
+# isolated, so ``L_{IB} = 0``, the right-hand side vanishes, and the representative
+# `harmonic_extension` returns is the formation collapsed onto the origin. Projection
+# instead leaves it exactly where it was.
+
+blind = build_projection_escort_ring(NA, TV, R; ranks = zeros(Int, NA))
+x_blind, null_blind = harmonic_extension(blind, Dict(TV => vcat(target, 1.0)))
+here = vcat([vcat([-0.8, 0.5] .+ offsets[i], 1.0) for i in 1:NA]...)
+N = Matrix(qr(null_blind[1:3NA, :]).Q)[:, 1:size(null_blind, 2)]
+nearest = Vector(x_blind)[1:3NA] .+ N * (N' * (here .- Vector(x_blind)[1:3NA]))
+
+@printf("undetermined directions      : %d  (two translations and the dilation)\n", size(null_blind, 2))
+@printf("‖returned representative‖    : %.3e  (the collapsed formation)\n", norm(Vector(x_blind)[1:3NA]))
+@printf("‖nearest point − current‖    : %.3e  (the ring does not move at all)\n", norm(nearest - here))
+@printf("‖δx‖ at that point           : %.3e  (still an exact hexagon)\n",
+        norm(coboundary_map(blind) * vcat(nearest, target, 1.0)))
+
+# The ring holds its shape and simply stops tracking, at zero energy — which is exactly what
+# the interactive demo does when you press `0`.
 #
 # ## Why the observation edge needs a second row
 #

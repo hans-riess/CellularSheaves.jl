@@ -3,50 +3,66 @@
 
 Simulation state for the interactive hexagon coordination demo.
 
-Six agents hold a regular hexagon around a target that the user drives with the
-keyboard. Agents 1, 3 and 5 each observe only the projection of the target onto
-the angle bisector at their own vertex; agents 2, 4 and 6 observe nothing. Every
-frame, a harmonic extension over the coordination sheaf fuses those scalar
-readings into a full target estimate and hands each agent a position reference.
+Six agents hold a regular hexagon around a target that the user drives with the keyboard.
+Each agent carries an **observation rank** that can be cycled live:
 
-The sheaf is built by `build_projection_escort_ring`; see its docstring for the
-mathematics, including why the observation edges carry a two-dimensional stalk.
+| rank | what the agent knows |
+|---|---|
+| 0 | nothing — no observation edge at all |
+| 1 | one scalar, the target's projection onto its own angle bisector |
+| 2 | the target's position in full (the classic escort pin) |
 
-This module holds no I/O. `server.jl` drives it and streams `snapshot` out over
-a WebSocket.
+Every frame, a harmonic extension over the coordination sheaf fuses whatever readings exist
+and hands each agent a position reference. The sheaf is built by
+`build_projection_escort_ring`; see its docstring for the mathematics, including why every
+observation edge carries a gauge row.
+
+This module holds no I/O. `server.jl` drives it and streams `snapshot` out over a WebSocket.
 """
 module HexagonDemo
 
 using CellularSheaves
 using LinearAlgebra
 
-export DemoState, step!, snapshot, set_observers!, reset!, toggle_recording!, save_track
+export DemoState, step!, snapshot, cycle_rank!, set_ranks!, toggle_all_ranks!,
+       adjust_gain!, cycle_feedforward!, reset!, toggle_recording!, save_track
 
 const N_AGENTS = 6
 const RADIUS = 0.55
 const TARGET_VERTEX = N_AGENTS + 1
 const D = 3
+const MAX_RANK = D - 1
 
-# The arena the browser draws, in the same units as the ring radius. Sized so
-# the ring plus the target's reachable box stays comfortably inside the frame.
+# The arena the browser draws, in the same units as the ring radius. Sized so the ring plus
+# the target's reachable box stays comfortably inside the frame.
 const ARENA_X = 4.0
 const ARENA_Y = 2.5
 
 const TARGET_ACCELERATION = 6.0     # units/s^2 while a key is held
 const TARGET_DAMPING = 3.2          # 1/s, coasts to a stop on release
 const TARGET_MAX_SPEED = 2.4
-const AGENT_GAIN = 4.0              # first-order descent onto the reference
-const AGENT_MAX_SPEED = 3.5
+
+# Pursuit defaults. The target's terminal speed is TARGET_ACCELERATION / TARGET_DAMPING =
+# 1.875, so a gain of 2.5 with no feedforward leaves a steady lag of about 0.75 units --
+# roughly 1.4 ring radii. The ring trails, swings wide on direction changes, and closes in
+# when the target slows. Raising `feedforward` to 1.0 cancels that lag exactly at any gain,
+# which is why turning the gain down alone would not have produced any.
+const DEFAULT_GAIN = 2.5
+const DEFAULT_FEEDFORWARD = 0.0
+const AGENT_MAX_SPEED = 2.2
+const GAIN_LIMITS = (0.4, 12.0)
+const FEEDFORWARD_STEPS = (0.0, 0.5, 1.0)
 
 """
-    DemoState(; observers=[1, 3, 5], radius=$RADIUS)
+    DemoState(; ranks=[1,0,1,0,1,0], radius=$RADIUS)
 
-Mutable state of a running demo: the sheaf, the agents, the target, and the
-recording buffer.
+Mutable state of a running demo: the sheaf, the agents, the target, the controller gains,
+and the recording buffer.
 """
 mutable struct DemoState
     radius::Float64
-    observers::Vector{Int}
+    ranks::Vector{Int}
+    restore_ranks::Vector{Int}
     sheaf::EuclideanSheaf{Float64}
     offsets::Vector{Vector{Float64}}
     directions::Vector{Vector{Float64}}
@@ -56,54 +72,107 @@ mutable struct DemoState
     target::Vector{Float64}
     velocity::Vector{Float64}
     command::Vector{Float64}
+    gain::Float64
+    feedforward::Float64
     time::Float64
     recording::Bool
     track::Vector{NTuple{3,Float64}}
 end
 
-function DemoState(; observers::AbstractVector{<:Integer}=[1, 3, 5], radius::Real=RADIUS)
-    state = DemoState(Float64(radius), Int[], EuclideanSheaf{Float64}(fill(D, TARGET_VERTEX)),
+function DemoState(; ranks::AbstractVector{<:Integer}=[i % 2 == 1 ? 1 : 0 for i in 1:N_AGENTS],
+                   radius::Real=RADIUS)
+    state = DemoState(Float64(radius), zeros(Int, N_AGENTS), zeros(Int, N_AGENTS),
+                      EuclideanSheaf{Float64}(fill(D, TARGET_VERTEX)),
                       Vector{Float64}[], Vector{Float64}[], zeros(0, 0),
                       Vector{Float64}[], Vector{Float64}[],
-                      zeros(2), zeros(2), zeros(2), 0.0, false, NTuple{3,Float64}[])
-    set_observers!(state, observers)
+                      zeros(2), zeros(2), zeros(2),
+                      DEFAULT_GAIN, DEFAULT_FEEDFORWARD, 0.0, false, NTuple{3,Float64}[])
+    angles = [(i - 1) * 2π / N_AGENTS for i in 1:N_AGENTS]
+    state.offsets = [Float64(radius) .* [cos(θ), sin(θ)] for θ in angles]
+    state.directions = bisector_directions(N_AGENTS)
+    set_ranks!(state, ranks)
     reset!(state)
     return state
 end
 
 """
-    set_observers!(state, observers) -> DemoState
+    set_ranks!(state, ranks) -> DemoState
 
-Rebuild the sheaf for a new observer set and recompute its null space.
+Rebuild the sheaf for a new per-agent rank vector and recompute its null space.
 
-The null space depends only on the topology, not on where the target is, so it
-is cached here rather than recomputed every frame. An empty observer set is
-ignored: with nothing pinning the homogeneous coordinate the formation could
-collapse to a point at zero energy, which is a degenerate case the demo has
-nothing useful to show for.
+The null space depends only on the topology, not on where the target is, so it is cached
+here rather than recomputed every frame. Out-of-range entries are clamped rather than
+rejected: this is driven by a keyboard, and a bad keystroke should not kill the session.
 """
-function set_observers!(state::DemoState, observers::AbstractVector{<:Integer})
-    wanted = sort(unique(Int.(observers)))
-    filter!(i -> 1 <= i <= N_AGENTS, wanted)
-    isempty(wanted) && return state
+function set_ranks!(state::DemoState, ranks::AbstractVector{<:Integer})
+    wanted = [clamp(Int(r), 0, MAX_RANK) for r in ranks]
+    length(wanted) == N_AGENTS || return state
 
-    state.observers = wanted
+    state.ranks = wanted
     state.sheaf = build_projection_escort_ring(N_AGENTS, TARGET_VERTEX, state.radius;
-                                               observers=wanted, D=D)
-    angles = [(i - 1) * 2π / N_AGENTS for i in 1:N_AGENTS]
-    state.offsets = [state.radius .* [cos(θ), sin(θ)] for θ in angles]
-    state.directions = bisector_directions(N_AGENTS)
-
+                                               ranks=wanted, D=D)
     _, null_basis = harmonic_extension(state.sheaf, Dict(TARGET_VERTEX => [0.0, 0.0, 1.0]))
-    state.null_basis = null_basis
+    state.null_basis = _orthonormal(null_basis[1:N_AGENTS*D, :])
     return state
+end
+
+"""
+    cycle_rank!(state, agent) -> DemoState
+
+Step one agent's observation rank 0 → 1 → 2 → 0.
+"""
+function cycle_rank!(state::DemoState, agent::Integer)
+    1 <= agent <= N_AGENTS || return state
+    ranks = copy(state.ranks)
+    ranks[agent] = (ranks[agent] + 1) % (MAX_RANK + 1)
+    return set_ranks!(state, ranks)
+end
+
+"""
+    toggle_all_ranks!(state) -> DemoState
+
+Drop every agent to rank 0, or restore the ranks in force before the last such drop.
+
+With nothing observing, the target vertex is isolated and the formation floats free — the
+ring holds its shape and stops tracking, which is exactly what the reference projection in
+[`step!`](@ref) arranges.
+"""
+function toggle_all_ranks!(state::DemoState)
+    if all(iszero, state.ranks)
+        restored = all(iszero, state.restore_ranks) ?
+            [i % 2 == 1 ? 1 : 0 for i in 1:N_AGENTS] : state.restore_ranks
+        return set_ranks!(state, restored)
+    end
+    state.restore_ranks = copy(state.ranks)
+    return set_ranks!(state, zeros(Int, N_AGENTS))
+end
+
+"""    adjust_gain!(state, factor) -> Float64
+
+Scale the agents' proportional gain, clamped to a sane range. Returns the new gain.
+"""
+function adjust_gain!(state::DemoState, factor::Real)
+    state.gain = clamp(state.gain * Float64(factor), GAIN_LIMITS...)
+    return state.gain
+end
+
+"""    cycle_feedforward!(state) -> Float64
+
+Step the feedforward scale through 0 → 0.5 → 1 → 0. At 1.0 the reference's own velocity is
+fed forward in full and the tracking lag vanishes; at 0 the lag is `speed / gain`.
+"""
+function cycle_feedforward!(state::DemoState)
+    index = findfirst(≈(state.feedforward), FEEDFORWARD_STEPS)
+    next = index === nothing ? 1 : index % length(FEEDFORWARD_STEPS) + 1
+    state.feedforward = FEEDFORWARD_STEPS[next]
+    return state.feedforward
 end
 
 """
     reset!(state) -> DemoState
 
-Return the target to the origin and scatter the agents onto a wider ring, so the
-formation is visibly out of place and has to converge.
+Return the target to the origin and scatter the agents onto a wider ring, so the formation
+is visibly out of place and has to converge.
 """
 function reset!(state::DemoState)
     state.target = zeros(2)
@@ -124,8 +193,9 @@ end
 
 Advance the demo by `dt` seconds.
 
-The target integrates the current keyboard command; the agents descend onto the
-harmonic reference with a feedforward term for the reference's own velocity.
+The target integrates the current keyboard command; the agents descend onto the harmonic
+reference, with the reference's own velocity fed forward in proportion to
+`state.feedforward`.
 """
 function step!(state::DemoState, dt::Real)
     dt = Float64(dt)
@@ -141,7 +211,7 @@ function step!(state::DemoState, dt::Real)
     state.reference = reference
 
     for i in 1:N_AGENTS
-        command = AGENT_GAIN .* (reference[i] .- state.positions[i]) .+ rate[i]
+        command = state.gain .* (reference[i] .- state.positions[i]) .+ state.feedforward .* rate[i]
         magnitude = norm(command)
         magnitude > AGENT_MAX_SPEED && (command .*= AGENT_MAX_SPEED / magnitude)
         state.positions[i] = state.positions[i] .+ dt .* command
@@ -151,22 +221,44 @@ function step!(state::DemoState, dt::Real)
     return state
 end
 
-# The harmonic reference and its rate. Both come from the same public entry
-# point: `harmonic_extension` is linear in the boundary data for a fixed
-# topology, so feeding it the target's *velocity* as boundary data returns the
-# reference's velocity. Note the homogeneous slot is 0.0 in the rate problem and
-# 1.0 in the position problem -- the affine gauge is a constant, so it has no
-# rate, and putting a 1.0 there would inject a spurious dilation into every
-# agent's feedforward.
+# The harmonic reference and its rate. Both come from the same public entry point:
+# `harmonic_extension` is linear in the boundary data for a fixed topology, so feeding it
+# the target's *velocity* returns the reference's velocity. Note the homogeneous slot is
+# 0.0 in the rate problem and 1.0 in the position problem -- the affine gauge is a
+# constant, so it has no rate, and putting a 1.0 there would inject a spurious dilation
+# into every agent's feedforward.
+#
+# When the observations do not determine the formation, `harmonic_extension` hands back a
+# representative of the solution set plus a basis for the free directions. That
+# representative is not the one we want: with every agent at rank 0 it is the formation
+# collapsed onto the origin. So we slide along the free directions to the point of the
+# solution set *nearest the configuration the agents already hold* -- undetermined means
+# "stay where you are", not "jump somewhere arbitrary".
 function _harmonic_reference(state::DemoState)
+    n = N_AGENTS * D
     position, _ = harmonic_extension(state.sheaf,
         Dict(TARGET_VERTEX => [state.target[1], state.target[2], 1.0]))
     rate, _ = harmonic_extension(state.sheaf,
         Dict(TARGET_VERTEX => [state.velocity[1], state.velocity[2], 0.0]))
-    pv, rv = Vector(position), Vector(rate)
+    pv, rv = Vector(position)[1:n], Vector(rate)[1:n]
+
+    N = state.null_basis
+    if size(N, 2) > 0
+        current = vcat([vcat(p, 1.0) for p in state.positions]...)
+        pv .+= N * (N' * (current .- pv))
+        rv .-= N * (N' * rv)
+    end
+
     reference = [pv[D*(i-1)+1:D*(i-1)+2] for i in 1:N_AGENTS]
     velocity = [rv[D*(i-1)+1:D*(i-1)+2] for i in 1:N_AGENTS]
     return reference, velocity
+end
+
+# `harmonic_extension`'s null basis is P⁻¹L⁻ᵀ applied to unit vectors -- a basis, but
+# neither orthonormal nor canonically signed. The projection above needs it orthonormal.
+function _orthonormal(basis::AbstractMatrix)
+    size(basis, 2) == 0 && return zeros(size(basis, 1), 0)
+    return Matrix(qr(basis).Q)[:, 1:size(basis, 2)]
 end
 
 function _clamp_to_arena!(state::DemoState)
@@ -197,8 +289,8 @@ end
 
 Write the recorded target path as `t,x,y` CSV and return the file path.
 
-The format is the one `hexagon_coordination.py --track` reads in the Robotarium
-demo, so a path driven here can be replayed on the robots.
+The format is the one `hexagon_coordination.py --track` reads in the Robotarium demo, so a
+path driven here can be replayed on the robots.
 """
 function save_track(state::DemoState, directory::AbstractString)
     isempty(state.track) && throw(ArgumentError("no target track has been recorded yet"))
@@ -218,14 +310,14 @@ end
 
 The frame sent to the browser: everything needed to draw, and nothing else.
 
-`null_directions` is empty exactly when the observations determine the
-formation; each entry is a uniform translation the formation could undergo at no
-Dirichlet-energy cost.
+`null_directions` is empty exactly when the observations determine the formation; each
+entry is a uniform translation the formation could undergo at no Dirichlet-energy cost.
 """
 function snapshot(state::DemoState)
+    observers = findall(>(0), state.ranks)
     projections = [let u = state.directions[i], anchor = state.positions[i]
                        anchor .+ dot(state.target .- anchor, u) .* u
-                   end for i in state.observers]
+                   end for i in observers]
 
     return (
         t = round(state.time; digits=3),
@@ -234,18 +326,23 @@ function snapshot(state::DemoState)
         agents = state.positions,
         reference = state.reference,
         target = state.target,
-        observers = state.observers,
-        directions = [state.directions[i] for i in state.observers],
+        ranks = state.ranks,
+        observers = observers,
+        directions = [state.directions[i] for i in observers],
         projections = projections,
+        scalar_readings = sum(state.ranks),
         null_directions = [state.null_basis[1:2, k] for k in 1:size(state.null_basis, 2)],
+        gain = round(state.gain; digits=2),
+        feedforward = state.feedforward,
+        lag = round(maximum(norm(state.reference[i] .- state.positions[i]) for i in 1:N_AGENTS); digits=3),
         energy = _energy(state),
         recording = state.recording,
         samples = length(state.track),
     )
 end
 
-# Sheaf Dirichlet energy of the *actual* agent configuration -- how far the
-# fleet is from satisfying its own coordination constraints right now.
+# Sheaf Dirichlet energy of the *actual* agent configuration -- how far the fleet is from
+# satisfying its own coordination constraints right now.
 function _energy(state::DemoState)
     x = vcat([vcat(p, 1.0) for p in state.positions]..., vcat(state.target, 1.0))
     return round(sum(abs2, coboundary_map(state.sheaf) * x); sigdigits=4)

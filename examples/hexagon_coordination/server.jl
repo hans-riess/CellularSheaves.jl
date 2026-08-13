@@ -60,8 +60,16 @@ function handle_message(state::DemoState, raw)
     action = get(message, :action, nothing)
     if action == "reset"
         reset!(state)
-    elseif action == "observers"
-        haskey(message, :observers) && set_observers!(state, Int.(collect(message.observers)))
+    elseif action == "rank"
+        haskey(message, :agent) && cycle_rank!(state, Int(message.agent))
+    elseif action == "ranks"
+        haskey(message, :ranks) && set_ranks!(state, Int.(collect(message.ranks)))
+    elseif action == "ranks_all"
+        toggle_all_ranks!(state)
+    elseif action == "gain"
+        adjust_gain!(state, Float64(get(message, :factor, 1.0)))
+    elseif action == "feedforward"
+        cycle_feedforward!(state)
     elseif action == "record"
         toggle_recording!(state)
     elseif action == "save"
@@ -113,7 +121,8 @@ function main()
 
     @printf("\n  hexagon coordination demo\n")
     @printf("  open http://localhost:%d  (websocket on :%d)\n", HTTP_PORT, WS_PORT)
-    @printf("  arrows/WASD drive the target, 1-6 toggle observers, R records, S saves, space resets\n")
+    @printf("  arrows/WASD drive the target, 1-6 cycle observation rank, 0 drops all to rank 0\n")
+    @printf("  [ ] adjust gain, F cycles feedforward, R records, enter saves, space resets\n")
     @printf("  ctrl-c to stop\n\n")
 
     try

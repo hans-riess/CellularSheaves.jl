@@ -13,36 +13,60 @@ Then open <http://localhost:8080>.
 
 ## What it demonstrates
 
-Agents 1, 3 and 5 each observe the projection of the target onto the **angle
-bisector** at their own vertex — the line through the agent making congruent
-angles to its two ring neighbours. Agents 2, 4 and 6 observe nothing at all.
+Each agent carries an **observation rank**, cycled live with the number keys:
 
-One scalar per observer is not enough for any single agent to locate the target.
-Three of them, 120° apart, over-determine the formation's two translational
-degrees of freedom, and they do so isotropically: `∑ uᵢuᵢᵀ = (3/2) I`. Every
-frame the backend calls
+| rank | what that agent knows | drawn as |
+|---|---|---|
+| 0 | nothing at all | bare marker |
+| 1 | one number — the target projected onto the **angle bisector** at its vertex | green bisector line, red projection foot |
+| 2 | the target's position in full (the classic escort pin) | purple sight line |
+
+Every frame the backend calls
 [`harmonic_extension`](../../src/network_sheaves/EuclideanSheaves.jl) to fuse
-those readings and propagate the answer to the agents that saw nothing.
+whatever readings exist and propagate the answer to the agents that saw nothing.
 
-Press `3` and `5` to drop to a single observer. A thick bar appears through the
-ring: the translation that one scalar reading cannot pin. The formation drifts
-along it while the sheaf energy stays at zero — that configuration really is a
-valid solution, it just isn't the only one. `harmonic_extension` returns that
-direction as a null-space basis rather than silently picking a representative.
+The default — agents 1, 3, 5 at rank 1 — reads three scalars 120° apart, which
+fuse isotropically (`∑ uᵢuᵢᵀ = (3/2) I`) and over-determine the formation's two
+translational degrees of freedom.
 
-Press `1` and `4` together (and nothing else) for the subtler version: two
-observers at diametrically opposite vertices have antiparallel bisectors, so the
-second reading is redundant and the formation is *still* under-determined.
+**The experiment worth running.** Put a single agent at rank 2 and the rest at
+rank 0: two scalar readings, formation determined. Now instead put agents **1 and
+4** at rank 1: also two scalar readings, but a thick bar appears through the ring.
+Those vertices are diametrically opposite, so their bisectors are antiparallel and
+the second reading repeats the first. What determines the formation is not how
+many numbers you read but whether the directions you read along *span*.
+
+Press `0` for no tracking at all. The ring keeps its shape and simply stops
+following you — it does not collapse, because the demo resolves undetermined
+directions by taking the point of the solution set nearest the configuration the
+agents already hold. "Undetermined" means stay put, not jump somewhere arbitrary.
 
 ## Controls
 
 | Key | Action |
 |---|---|
 | arrows / WASD | drive the target (keys accelerate; it coasts on release) |
-| `1` … `6` | toggle whether that agent observes the target |
+| `1` … `6` | cycle that agent's rank: none → line → full |
+| `0` | drop every agent to rank 0 (press again to restore) |
+| `[` `]` | agent gain down / up |
+| `F` | feedforward 0 → ½ → 1 |
 | `R` | start / stop recording the target's path |
 | `enter` | save the recording as CSV under `tracks/` |
 | `space` | reset |
+
+## Why the ring lags
+
+By default the ring trails you by roughly 1.4 ring radii, swings wide when you
+change direction, and closes in when you slow down. Two knobs control that:
+
+- **gain** (`[` / `]`) — the proportional term. Steady lag is `speed / gain`.
+- **feedforward** (`F`) — the reference's own velocity, fed forward. At `1.0` it
+  cancels the lag *exactly, at any gain*, which is why the demo shipped feeling
+  glued to the target until this was turned down. At `0` you get the full
+  `speed / gain` lag.
+
+Agents also cap at 2.2 units/s against a target that tops out at 1.875, so you can
+break away briefly on a sharp turn but not outrun the formation.
 
 ## Recording for the Robotarium
 
