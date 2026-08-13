@@ -1,8 +1,9 @@
-# Interactive hexagon coordination demo
+# Interactive coordination sheaf demo
 
-Drive a target around with the keyboard and watch six agents hold formation
-around it — while only three of them can see it, and each of those sees only
-*one number*.
+Drive a target around with the keyboard and watch a formation hold station around
+it — while only some of the agents can see it, and those that can see only
+*one number* each. Draw the formation yourself: agents go where you click, and
+the wiring between them is yours to cut and re-make.
 
 ```
 julia --project=examples/hexagon_coordination -e 'using Pkg; Pkg.instantiate()'
@@ -18,8 +19,8 @@ Each agent carries an **observation rank**, cycled live with the number keys:
 | rank | what that agent knows | drawn as |
 |---|---|---|
 | 0 | nothing at all | bare marker |
-| 1 | one number — the target projected onto the **angle bisector** at its vertex | green bisector line, red projection foot |
-| 2 | the target's position in full (the classic escort pin) | purple sight line |
+| 1 | one number — the target projected onto the **angle bisector** at its vertex | pale bisector line, gold projection foot |
+| 2 | the target's position in full (the classic escort pin) | teal sight line |
 
 Every frame the backend calls
 [`harmonic_extension`](../../src/network_sheaves/EuclideanSheaves.jl) to fuse
@@ -54,9 +55,8 @@ agents already hold. "Undetermined" means stay put, not jump somewhere arbitrary
 | `E` | restore the ring wiring |
 | `R` | start / stop recording the target's path |
 | `enter` | save the recording as CSV under `tracks/` |
-| `space` | reset |
-
 | `C` | clear the board and start from nothing |
+| `space` | reset |
 
 | Mouse | Action |
 |---|---|
