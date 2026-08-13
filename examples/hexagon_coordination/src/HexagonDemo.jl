@@ -26,12 +26,17 @@ using LinearAlgebra
 
 export DemoState, step!, snapshot, cycle_rank!, set_ranks!, toggle_all_ranks!,
        connect_agents!, disconnect_agents!, reset_edges!, toggle_ghosts!,
+       add_node!, remove_node!, clear_nodes!, n_agents, MAX_AGENTS,
        adjust_gain!, cycle_feedforward!, reset!, toggle_recording!, save_track
 
-const N_AGENTS = 6
+const MAX_AGENTS = 6
 const RADIUS = 0.55
-const TARGET_VERTEX = N_AGENTS + 1
 const D = 3
+
+# The agent count is whatever the user has drawn, so both it and the target's vertex index
+# are derived from the current formation rather than fixed.
+n_agents(state) = length(state.offsets)
+target_vertex(state) = length(state.offsets) + 1
 const MAX_RANK = D - 1
 
 # The arena the browser draws, in the same units as the ring radius. Sized so the ring plus
@@ -82,24 +87,23 @@ mutable struct DemoState
     track::Vector{NTuple{3,Float64}}
 end
 
-function DemoState(; ranks::AbstractVector{<:Integer}=[i % 2 == 1 ? 1 : 0 for i in 1:N_AGENTS],
+function DemoState(; ranks::AbstractVector{<:Integer}=[i % 2 == 1 ? 1 : 0 for i in 1:MAX_AGENTS],
                    radius::Real=RADIUS)
-    state = DemoState(Float64(radius), zeros(Int, N_AGENTS), zeros(Int, N_AGENTS),
-                      _cycle_edges(), false,
-                      EuclideanSheaf{Float64}(fill(D, TARGET_VERTEX)),
+    state = DemoState(Float64(radius), Int[], Int[], Tuple{Int,Int}[], false,
+                      EuclideanSheaf{Float64}(fill(D, 1)),
                       Vector{Float64}[], Vector{Float64}[], zeros(0, 0),
                       Vector{Float64}[], Vector{Float64}[],
                       zeros(2), zeros(2), zeros(2),
                       DEFAULT_GAIN, DEFAULT_FEEDFORWARD, 0.0, false, NTuple{3,Float64}[])
-    angles = [(i - 1) * 2π / N_AGENTS for i in 1:N_AGENTS]
-    state.offsets = [Float64(radius) .* [cos(θ), sin(θ)] for θ in angles]
-    state.directions = bisector_directions(N_AGENTS)
-    set_ranks!(state, ranks)
     reset!(state)
+    length(ranks) == n_agents(state) && set_ranks!(state, ranks)
     return state
 end
 
-_cycle_edges() = [(i, i % N_AGENTS + 1) for i in 1:N_AGENTS]
+_regular_offsets(n, radius) =
+    [Float64(radius) .* [cos((i - 1) * 2π / n), sin((i - 1) * 2π / n)] for i in 1:n]
+
+_cycle_edges(n) = n >= 3 ? [(i, i % n + 1) for i in 1:n] : [(i, i + 1) for i in 1:(n - 1)]
 
 _normalise(a, b) = (min(Int(a), Int(b)), max(Int(a), Int(b)))
 
@@ -107,20 +111,28 @@ _normalise(a, b) = (min(Int(a), Int(b)), max(Int(a), Int(b)))
 # null space depends only on the topology, not on where the target is, so it is computed
 # here rather than every frame.
 function _rebuild!(state::DemoState)
-    previous = (state.sheaf, state.null_basis)
+    n = n_agents(state)
+    if n == 0
+        state.directions = Vector{Float64}[]
+        state.null_basis = zeros(0, 0)
+        return state
+    end
+    previous = (state.sheaf, state.null_basis, state.directions)
     try
-        state.sheaf = build_projection_escort_ring(N_AGENTS, TARGET_VERTEX, state.radius;
+        tv = target_vertex(state)
+        state.sheaf = build_projection_escort_ring(state.offsets, tv;
                                                    ranks=state.ranks, D=D,
                                                    consensus_edges=state.edges)
-        _, null_basis = harmonic_extension(state.sheaf, Dict(TARGET_VERTEX => [0.0, 0.0, 1.0]))
-        state.null_basis = _orthonormal(null_basis[1:N_AGENTS*D, :])
+        state.directions = bisector_directions(state.offsets)
+        _, null_basis = harmonic_extension(state.sheaf, Dict(tv => [0.0, 0.0, 1.0]))
+        state.null_basis = _orthonormal(null_basis[1:n*D, :])
     catch err
         # A mouse can reach topologies a keyboard could not -- every edge cut and every
         # rank zeroed leaves a sheaf with no edges at all, and the factorisation of an
         # entirely zero Laplacian is a corner the solver need not be expected to enjoy.
         # Keep the session alive on the previous topology rather than dropping the socket.
         @warn "could not rebuild the sheaf; keeping the previous topology" exception = err
-        state.sheaf, state.null_basis = previous
+        state.sheaf, state.null_basis, state.directions = previous
     end
     return state
 end
@@ -135,7 +147,7 @@ mouse, and a stray input should not kill the session.
 """
 function set_ranks!(state::DemoState, ranks::AbstractVector{<:Integer})
     wanted = [clamp(Int(r), 0, MAX_RANK) for r in ranks]
-    length(wanted) == N_AGENTS || return state
+    length(wanted) == n_agents(state) || return state
     state.ranks = wanted
     return _rebuild!(state)
 end
@@ -147,7 +159,8 @@ Wire two agents together with a consensus edge. A no-op if they already share on
 either index is out of range.
 """
 function connect_agents!(state::DemoState, a::Integer, b::Integer)
-    (1 <= a <= N_AGENTS && 1 <= b <= N_AGENTS && a != b) || return state
+    n = n_agents(state)
+    (1 <= a <= n && 1 <= b <= n && a != b) || return state
     edge = _normalise(a, b)
     edge in state.edges && return state
     push!(state.edges, edge)
@@ -172,12 +185,66 @@ function disconnect_agents!(state::DemoState, a::Integer, b::Integer)
     return _rebuild!(state)
 end
 
+"""
+    add_node!(state, position) -> DemoState
+
+Place a new agent at `position`, in world coordinates. A no-op once `$MAX_AGENTS` are down.
+
+The agent's *offset* — its share of the formation's shape — is taken relative to the
+target, so the agent settles exactly where it was dropped and then travels with the target
+from there. It joins the end of the cyclic order, which is what defines its angle bisector,
+and starts at rank 0 with no wiring: a new agent sees nothing and talks to no one until you
+say otherwise.
+"""
+function add_node!(state::DemoState, position::AbstractVector{<:Real})
+    n_agents(state) >= MAX_AGENTS && return state
+    push!(state.offsets, Float64.(position) .- state.target)
+    push!(state.ranks, 0)
+    push!(state.positions, Float64.(collect(position)))
+    push!(state.reference, Float64.(collect(position)))
+    return _rebuild!(state)
+end
+
+"""
+    remove_node!(state, agent) -> DemoState
+
+Delete an agent, along with any edges touching it.
+
+The agents after it shift down to close the gap, so the surviving edges have to be
+renumbered to match — and because the cyclic order *is* the index order, deleting a node
+also re-cuts its neighbours' angle bisectors.
+"""
+function remove_node!(state::DemoState, agent::Integer)
+    n = n_agents(state)
+    (1 <= agent <= n) || return state
+    for field in (state.offsets, state.ranks, state.positions, state.reference)
+        deleteat!(field, agent)
+    end
+    kept = filter(e -> agent ∉ e, state.edges)
+    state.edges = [(a > agent ? a - 1 : a, b > agent ? b - 1 : b) for (a, b) in kept]
+    return _rebuild!(state)
+end
+
+"""    clear_nodes!(state) -> DemoState
+
+Remove every agent, leaving an empty board to draw a formation onto.
+"""
+function clear_nodes!(state::DemoState)
+    state.offsets = Vector{Float64}[]
+    state.ranks = Int[]
+    state.positions = Vector{Float64}[]
+    state.reference = Vector{Float64}[]
+    state.edges = Tuple{Int,Int}[]
+    state.restore_ranks = Int[]
+    return _rebuild!(state)
+end
+
 """    reset_edges!(state) -> DemoState
 
-Restore the original ring wiring.
+Restore the ring wiring for the current agent count.
 """
 function reset_edges!(state::DemoState)
-    state.edges = _cycle_edges()
+    state.edges = _cycle_edges(n_agents(state))
     return _rebuild!(state)
 end
 
@@ -194,7 +261,7 @@ toggle_ghosts!(state::DemoState) = (state.show_ghosts = !state.show_ghosts)
 Step one agent's observation rank 0 → 1 → 2 → 0.
 """
 function cycle_rank!(state::DemoState, agent::Integer)
-    1 <= agent <= N_AGENTS || return state
+    1 <= agent <= n_agents(state) || return state
     ranks = copy(state.ranks)
     ranks[agent] = (ranks[agent] + 1) % (MAX_RANK + 1)
     return set_ranks!(state, ranks)
@@ -212,11 +279,11 @@ ring holds its shape and stops tracking, which is exactly what the reference pro
 function toggle_all_ranks!(state::DemoState)
     if all(iszero, state.ranks)
         restored = all(iszero, state.restore_ranks) ?
-            [i % 2 == 1 ? 1 : 0 for i in 1:N_AGENTS] : state.restore_ranks
+            [i % 2 == 1 ? 1 : 0 for i in 1:n_agents(state)] : state.restore_ranks
         return set_ranks!(state, restored)
     end
     state.restore_ranks = copy(state.ranks)
-    return set_ranks!(state, zeros(Int, N_AGENTS))
+    return set_ranks!(state, zeros(Int, n_agents(state)))
 end
 
 """    adjust_gain!(state, factor) -> Float64
@@ -251,11 +318,15 @@ function reset!(state::DemoState)
     state.velocity = zeros(2)
     state.command = zeros(2)
     state.time = 0.0
-    reset_edges!(state)
+    state.offsets = _regular_offsets(MAX_AGENTS, state.radius)
+    state.ranks = [i % 2 == 1 ? 1 : 0 for i in 1:MAX_AGENTS]
+    state.restore_ranks = zeros(Int, MAX_AGENTS)
+    state.edges = _cycle_edges(MAX_AGENTS)
     scatter = 1.6 * state.radius
-    state.positions = [scatter .* [cos((i - 0.5) * 2π / N_AGENTS), sin((i - 0.5) * 2π / N_AGENTS)]
-                       for i in 1:N_AGENTS]
+    state.positions = [scatter .* [cos((i - 0.5) * 2π / MAX_AGENTS), sin((i - 0.5) * 2π / MAX_AGENTS)]
+                       for i in 1:MAX_AGENTS]
     state.reference = deepcopy(state.positions)
+    _rebuild!(state)
     empty!(state.track)
     state.recording = false
     return state
@@ -283,7 +354,7 @@ function step!(state::DemoState, dt::Real)
     reference, rate = _harmonic_reference(state)
     state.reference = reference
 
-    for i in 1:N_AGENTS
+    for i in 1:n_agents(state)
         command = state.gain .* (reference[i] .- state.positions[i]) .+ state.feedforward .* rate[i]
         magnitude = norm(command)
         magnitude > AGENT_MAX_SPEED && (command .*= AGENT_MAX_SPEED / magnitude)
@@ -308,11 +379,14 @@ end
 # solution set *nearest the configuration the agents already hold* -- undetermined means
 # "stay where you are", not "jump somewhere arbitrary".
 function _harmonic_reference(state::DemoState)
-    n = N_AGENTS * D
+    agents = n_agents(state)
+    agents == 0 && return Vector{Float64}[], Vector{Float64}[]
+    n = agents * D
+    tv = target_vertex(state)
     position, _ = harmonic_extension(state.sheaf,
-        Dict(TARGET_VERTEX => [state.target[1], state.target[2], 1.0]))
+        Dict(tv => [state.target[1], state.target[2], 1.0]))
     rate, _ = harmonic_extension(state.sheaf,
-        Dict(TARGET_VERTEX => [state.velocity[1], state.velocity[2], 0.0]))
+        Dict(tv => [state.velocity[1], state.velocity[2], 0.0]))
     pv, rv = Vector(position)[1:n], Vector(rate)[1:n]
 
     N = state.null_basis
@@ -322,8 +396,8 @@ function _harmonic_reference(state::DemoState)
         rv .-= N * (N' * rv)
     end
 
-    reference = [pv[D*(i-1)+1:D*(i-1)+2] for i in 1:N_AGENTS]
-    velocity = [rv[D*(i-1)+1:D*(i-1)+2] for i in 1:N_AGENTS]
+    reference = [pv[D*(i-1)+1:D*(i-1)+2] for i in 1:agents]
+    velocity = [rv[D*(i-1)+1:D*(i-1)+2] for i in 1:agents]
     return reference, velocity
 end
 
@@ -402,6 +476,8 @@ function snapshot(state::DemoState)
         target = state.target,
         edges = [collect(e) for e in state.edges],
         ranks = state.ranks,
+        n_agents = n_agents(state),
+        max_agents = MAX_AGENTS,
         observers = observers,
         directions = [state.directions[i] for i in observers],
         projections = projections,
@@ -409,7 +485,8 @@ function snapshot(state::DemoState)
         null_directions = [state.null_basis[1:2, k] for k in 1:size(state.null_basis, 2)],
         gain = round(state.gain; digits=2),
         feedforward = state.feedforward,
-        lag = round(maximum(norm(state.reference[i] .- state.positions[i]) for i in 1:N_AGENTS); digits=3),
+        lag = isempty(state.positions) ? 0.0 :
+              round(maximum(norm(state.reference[i] .- state.positions[i]) for i in 1:n_agents(state)); digits=3),
         energy = _energy(state),
         recording = state.recording,
         samples = length(state.track),

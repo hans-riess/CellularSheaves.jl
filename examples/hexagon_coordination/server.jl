@@ -74,6 +74,12 @@ function handle_message(state::DemoState, raw)
             disconnect_agents!(state, Int(message.from), Int(message.to))
     elseif action == "reset_edges"
         reset_edges!(state)
+    elseif action == "add_node"
+        haskey(message, :at) && add_node!(state, Float64.(collect(message.at)))
+    elseif action == "remove_node"
+        haskey(message, :agent) && remove_node!(state, Int(message.agent))
+    elseif action == "clear_nodes"
+        clear_nodes!(state)
     elseif action == "ghosts"
         toggle_ghosts!(state)
     elseif action == "gain"
@@ -133,6 +139,7 @@ function main()
     @printf("  open http://localhost:%d  (websocket on :%d)\n", HTTP_PORT, WS_PORT)
     @printf("  arrows/WASD drive the target, 1-6 cycle observation rank, 0 drops all to rank 0\n")
     @printf("  [ ] adjust gain, F cycles feedforward, R records, enter saves, space resets\n")
+    @printf("  click empty board to add an agent, shift-click one to remove it, C clears\n")
     @printf("  ctrl-c to stop\n\n")
 
     try

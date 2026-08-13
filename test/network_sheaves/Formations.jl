@@ -126,6 +126,69 @@ using LinearAlgebra
         @test_throws Exception bisector_directions(2)
     end
 
+    @testset "bisector_directions — arbitrary formations" begin
+        polygon(n, r) = [r .* [cos(2π * (i - 1) / n), sin(2π * (i - 1) / n)] for i in 1:n]
+
+        # The whole point: on a regular polygon the angle bisector *is* the inward radial
+        # direction, so the general method must reproduce the closed-form one exactly.
+        for n in (3, 4, 5, 6, 8)
+            general = bisector_directions(polygon(n, 0.55))
+            radial = bisector_directions(n)
+            @test maximum(norm(general[i] - radial[i]) for i in 1:n) < 1e-12
+        end
+        # ... and independent of scale.
+        @test all(bisector_directions(polygon(6, 7.25)) .≈ bisector_directions(polygon(6, 0.3)))
+
+        # On an irregular shape the two genuinely part company, which is what makes free
+        # placement worth supporting at all.
+        irregular = [[0.8, 0.0], [0.2, 0.6], [-0.7, 0.3], [-0.3, -0.7]]
+        bisectors = bisector_directions(irregular)
+        @test all(v -> norm(v) ≈ 1.0, bisectors)
+        @test maximum(norm(bisectors[i] + normalize(irregular[i])) for i in 1:4) > 1e-2
+
+        # Each bisector really does make congruent angles with its two neighbouring rays.
+        for i in 1:4
+            back = normalize(irregular[mod1(i - 1, 4)] - irregular[i])
+            forth = normalize(irregular[mod1(i + 1, 4)] - irregular[i])
+            @test dot(bisectors[i], back) ≈ dot(bisectors[i], forth) atol=1e-12
+        end
+
+        # Degenerate vertices fall back to pointing at the centroid.
+        straight = [[-1.0, 0.0], [0.0, 0.0], [1.0, 0.0], [0.0, -1.0]]
+        @test bisector_directions(straight)[2] ≈ [0.0, -1.0] atol=1e-12
+        coincident = [[0.5, 0.0], [0.5, 0.0], [-0.5, 0.4], [-0.5, -0.4]]
+        @test norm(bisector_directions(coincident)[1]) ≈ 1.0
+        # Fewer than three vertices have no interior angle at all.
+        @test bisector_directions([[1.0, 0.0], [-1.0, 0.0]]) ≈ [[-1.0, 0.0], [1.0, 0.0]]
+    end
+
+    @testset "build_projection_escort_ring — explicit offsets" begin
+        R = 0.35
+        boundary = Dict(7 => [0.55, -0.30, 1.0])
+        polygon(n, r) = [r .* [cos(2π * (i - 1) / n), sin(2π * (i - 1) / n)] for i in 1:n]
+
+        # The regular-polygon method is a wrapper over the explicit-offset one.
+        @test build_projection_escort_ring(6, 7, R) ==
+              build_projection_escort_ring(polygon(6, R), 7)
+
+        # An irregular formation still recovers its own shape exactly.
+        shape = [[0.4, 0.05], [0.1, 0.42], [-0.35, 0.2], [-0.2, -0.38], [0.25, -0.3]]
+        sheaf = build_projection_escort_ring(shape, 6; observers=[1, 3, 5])
+        target = [0.55, -0.30]
+        x, null_basis = harmonic_extension(sheaf, Dict(6 => vcat(target, 1.0)))
+        @test size(null_basis, 2) == 0
+        xv = Vector(x)
+        for i in 1:5
+            @test xv[3(i-1)+1:3(i-1)+2] ≈ target .+ shape[i] atol=1e-10
+        end
+
+        # Fewer than three agents is allowed; the default wiring is then a path, not a cycle.
+        pair = build_projection_escort_ring([[0.3, 0.0], [-0.3, 0.0]], 3; ranks=[2, 0])
+        @test ne(pair.underlying_graph) == 2
+        @test_throws Exception build_projection_escort_ring([[0.3, 0.0]], 1)
+        @test_throws Exception build_projection_escort_ring([[0.3, 0.0, 0.0]], 2; D=3)
+    end
+
     @testset "build_projection_escort_ring — structure" begin
         R = 0.35
         s = build_projection_escort_ring(6, 7, R)

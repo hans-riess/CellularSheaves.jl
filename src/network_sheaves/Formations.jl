@@ -215,6 +215,64 @@ function bisector_directions(n_agents::Int; trans_dim::Int=2)
 end
 
 """
+    bisector_directions(offsets::AbstractVector{<:AbstractVector}) -> Vector{Vector{Float64}}
+
+Interior angle bisectors of an arbitrary formation, one per vertex.
+
+The bisector at vertex `i` is the direction that makes congruent angles with the rays to
+its two neighbours **in cyclic index order** — `i-1` and `i+1`, wrapping around — and it is
+computed the usual way, by adding the two unit rays:
+
+```math
+u_i \\;=\\; \\mathrm{normalize}\\!\\left(
+  \\frac{d_{i-1} - d_i}{\\|d_{i-1} - d_i\\|} + \\frac{d_{i+1} - d_i}{\\|d_{i+1} - d_i\\|}\\right)
+```
+
+Note the cyclic order is the order of `offsets` itself, **not** the consensus wiring. The
+two are independent — the geometry says what shape the formation holds, the topology says
+who talks to whom — so the bisector at a vertex is well defined even when that vertex has
+no consensus edges at all, which is what makes an interactively built formation workable.
+
+For a regular polygon this reproduces [`bisector_directions(n_agents)`](@ref) exactly, since
+there the angle bisector *is* the inward radial direction.
+
+# Degenerate vertices
+
+Two cases have no angle to bisect, and both fall back to pointing at the formation's
+centroid — the natural generalisation of "inward", and what the regular case reduces to:
+
+- a **straight** vertex, where the two neighbours are collinear with it, so the rays cancel;
+- a vertex **coincident** with one of its neighbours, where a ray has no direction at all.
+
+A formation of fewer than three vertices has no interior angles either, and takes the same
+fallback throughout.
+"""
+function bisector_directions(offsets::AbstractVector{<:AbstractVector{<:Real}})
+    n = length(offsets)
+    @argcheck n >= 1 "need at least one offset"
+    trans_dim = length(first(offsets))
+    @argcheck all(length(d) == trans_dim for d in offsets) "every offset must have the same length"
+
+    centroid = sum(offsets) ./ n
+    inward(here) = begin
+        toward = centroid .- here
+        norm(toward) > 1e-12 ? toward ./ norm(toward) :
+            Float64[k == 1 ? 1.0 : 0.0 for k in 1:trans_dim]
+    end
+
+    map(1:n) do i
+        here = Float64.(offsets[i])
+        n < 3 && return inward(here)
+        back = Float64.(offsets[mod1(i - 1, n)]) .- here
+        forth = Float64.(offsets[mod1(i + 1, n)]) .- here
+        nb, nf = norm(back), norm(forth)
+        (nb < 1e-12 || nf < 1e-12) && return inward(here)
+        u = back ./ nb .+ forth ./ nf
+        norm(u) < 1e-9 ? inward(here) : u ./ norm(u)
+    end
+end
+
+"""
     _observation_selector(rank::Int, direction::AbstractVector, D::Int) -> Matrix{Float64}
 
 The `(rank+1) × D` matrix an agent applies to a stalk `[p; h]` to expose what it observes.
@@ -352,7 +410,47 @@ function build_projection_escort_ring(n_agents::Int, target_node::Int, radius::R
     @argcheck n_agents >= 3 "n_agents must be >= 3 for a non-degenerate ring (got $n_agents)"
     @argcheck D >= 3 "D must be >= 3: at least two translation coordinates plus a homogeneous one (got $D)"
     @argcheck radius > 0 "radius must be positive to define a bisector direction (got $radius)"
+
+    trans_dim = D - 1
+    offsets = map(1:n_agents) do i
+        angle = (i - 1) * 2π / n_agents
+        d = zeros(trans_dim)
+        d[1] = cos(angle) * radius
+        d[2] = sin(angle) * radius
+        return d
+    end
+    return build_projection_escort_ring(offsets, target_node;
+                                        observers=observers, ranks=ranks,
+                                        consensus_edges=consensus_edges, D=D)
+end
+
+"""
+    build_projection_escort_ring(offsets::AbstractVector{<:AbstractVector}, target_node::Int;
+                                 observers=1:2:length(offsets), ranks=nothing,
+                                 consensus_edges=nothing, D=length(first(offsets))+1)
+        -> EuclideanSheaf{Float64}
+
+Build the same sheaf around an **arbitrary** formation shape rather than a regular polygon.
+
+`offsets[i]` is agent `i`'s nominal displacement from the formation centre, and the list's
+own order is the cyclic order that defines each agent's angle bisector — see
+[`bisector_directions`](@ref)`(offsets)`. Everything else is as in the regular-polygon
+method above, which is implemented by forwarding to this one.
+
+This is what an interactively drawn formation needs: the shape is whatever the user placed,
+so the observation direction at each vertex has to be the real angle bisector rather than
+the radial direction, and the two only coincide when the polygon is regular.
+"""
+function build_projection_escort_ring(offsets::AbstractVector{<:AbstractVector{<:Real}},
+                                      target_node::Int;
+                                      observers=1:2:length(offsets), ranks=nothing,
+                                      consensus_edges=nothing,
+                                      D::Int=length(first(offsets)) + 1)
+    n_agents = length(offsets)
+    @argcheck n_agents >= 1 "need at least one agent"
+    @argcheck D >= 3 "D must be >= 3: at least two translation coordinates plus a homogeneous one (got $D)"
     @argcheck target_node > n_agents "target_node must be outside 1:n_agents (got $target_node)"
+    @argcheck all(length(d) == D - 1 for d in offsets) "each offset must have D-1 = $(D-1) coordinates"
 
     trans_dim = D - 1
     observation_ranks = if ranks === nothing
@@ -366,7 +464,8 @@ function build_projection_escort_ring(n_agents::Int, target_node::Int, radius::R
     end
 
     wiring = if consensus_edges === nothing
-        [(i, i % n_agents + 1) for i in 1:n_agents]
+        n_agents >= 3 ? [(i, i % n_agents + 1) for i in 1:n_agents] :
+            [(i, i + 1) for i in 1:(n_agents - 1)]
     else
         pairs = [(min(Int(a), Int(b)), max(Int(a), Int(b))) for (a, b) in consensus_edges]
         @argcheck all(1 <= a && b <= n_agents for (a, b) in pairs) "consensus_edges must join agents in 1:n_agents"
@@ -378,15 +477,8 @@ function build_projection_escort_ring(n_agents::Int, target_node::Int, radius::R
     total_nodes = max(n_agents, target_node)
     sheaf = EuclideanSheaf{Float64}(fill(D, total_nodes))
 
-    offsets = map(1:n_agents) do i
-        angle = (i - 1) * 2π / n_agents
-        d = zeros(trans_dim)
-        d[1] = cos(angle) * radius
-        d[2] = sin(angle) * radius
-        return d
-    end
-    directions = bisector_directions(n_agents; trans_dim=trans_dim)
-    frames = affine_translation_matrix.(offsets)
+    directions = bisector_directions(offsets)
+    frames = [affine_translation_matrix(Float64.(d)) for d in offsets]
 
     for (i, j) in wiring
         add_sheaf_edge!(sheaf, i, j, frames[i], frames[j])
