@@ -78,6 +78,11 @@ subtend. The cyclic order used for that is the order agents were created in — 
 edges. Geometry says what shape is held; topology says who talks to whom; the two stay
 independent.
 
+Only the target is fenced in. An agent's offset from it is fixed the moment you place the
+agent, so a formation drawn wide enough will follow the target straight past the wall — and
+an agent you cannot see is an agent you cannot click. The view therefore grows to hold
+whatever is drawn, and eases back when it no longer has to.
+
 ## The board
 
 The background is `static/img/header.jpeg`, served by `server.jl` from a second read-only

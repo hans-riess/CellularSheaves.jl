@@ -252,9 +252,47 @@ function fitCanvas() {
 }
 window.addEventListener("resize", fitCanvas);
 
-// World units -> canvas pixels. The arena is centred on the origin, letterboxed to fit.
-function makeTransform(arena) {
-  const scale = Math.min(canvas.width / arena[0], canvas.height / arena[1]);
+// ---- the view ------------------------------------------------------------------------
+// The drawn region is centred on the origin and letterboxed, and it is *at least* the
+// arena. It has to be allowed to be more than that: agents go wherever you click, and an
+// agent's offset from the target is fixed once placed, so driving the target to its own
+// limit carries a far-flung agent well past the arena wall. The arena only bounds the
+// target. Nothing bounds the formation, and an agent you cannot see is an agent you cannot
+// click, so the view grows to keep whatever is drawn on screen.
+let viewHalf = null;   // [half-width, half-height] in world units, smoothed across frames
+
+// Half-extents that would contain everything `render` is about to draw. Only markers count:
+// the bisector construction lines run off past the edge by design.
+function contentHalf(state) {
+  let hw = state.arena[0] / 2, hh = state.arena[1] / 2;
+  const margin = 0.2 * state.radius;
+  // A non-finite coordinate would otherwise poison the scale and blank the whole canvas
+  // rather than losing the one marker it belongs to.
+  const see = (p) => {
+    if (!Number.isFinite(p[0]) || !Number.isFinite(p[1])) return;
+    hw = Math.max(hw, Math.abs(p[0]) + margin);
+    hh = Math.max(hh, Math.abs(p[1]) + margin);
+  };
+  state.agents.forEach(see);
+  state.projections.forEach(see);
+  if (state.show_ghosts) state.reference.forEach(see);
+  see(state.target);
+  return [hw, hh];
+}
+
+// Grow at once, shrink slowly. Something leaving the arena must be visible on the very
+// frame it does so, but the board should not twitch each time an agent brushes the wall.
+function updateView(state) {
+  const want = contentHalf(state);
+  viewHalf = viewHalf === null ? want
+    : [Math.max(want[0], viewHalf[0] + (want[0] - viewHalf[0]) * 0.05),
+       Math.max(want[1], viewHalf[1] + (want[1] - viewHalf[1]) * 0.05)];
+  return viewHalf;
+}
+
+// World units -> canvas pixels, for the current view.
+function makeTransform(half) {
+  const scale = Math.min(canvas.width / (2 * half[0]), canvas.height / (2 * half[1]));
   const project = (p) => [canvas.width / 2 + p[0] * scale, canvas.height / 2 - p[1] * scale];
   project.scale = scale;
   return project;
@@ -271,13 +309,14 @@ let pressAt = null;       // where the press landed, in CSS pixels, to tell a cl
 const DRAG_SLOP = 5;      // CSS px of movement before a press counts as a drag
 
 // Pointer position in world units. The backing store is in device pixels while the event
-// is in CSS pixels, so the ratio between them has to come out.
+// is in CSS pixels, so the ratio between them has to come out. Read through the same view
+// the last frame was drawn with, so what you click is what you saw.
 function pointerWorld(event) {
   if (!frame) return null;
   const box = canvas.getBoundingClientRect();
   const px = (event.clientX - box.left) * (canvas.width / box.width);
   const py = (event.clientY - box.top) * (canvas.height / box.height);
-  const scale = Math.min(canvas.width / frame.arena[0], canvas.height / frame.arena[1]);
+  const scale = makeTransform(viewHalf || contentHalf(frame)).scale;
   return [(px - canvas.width / 2) / scale, (canvas.height / 2 - py) / scale];
 }
 
@@ -408,7 +447,8 @@ function disc(p, radius, fill, stroke = null, width = 2) {
 }
 
 function render(state) {
-  const toPixels = makeTransform(state.arena);
+  const half = updateView(state);
+  const toPixels = makeTransform(half);
   // Every visual size below is a fraction of `u`, the ring radius measured in pixels, so
   // the drawing keeps its proportions at any window size or pixel density. An agent marker
   // is a touch under a tenth of the ring radius.
@@ -422,7 +462,7 @@ function render(state) {
     ctx.save();
     ctx.globalAlpha = 0.3;
     for (const bar of state.null_directions) {
-      const reach = 0.42 * state.arena[0];
+      const reach = 0.84 * half[0];
       line(toPixels([bar.at[0] - bar.dir[0] * reach, bar.at[1] - bar.dir[1] * reach]),
            toPixels([bar.at[0] + bar.dir[0] * reach, bar.at[1] + bar.dir[1] * reach]),
            color("--warn"), 0.070 * u, []);
@@ -436,7 +476,7 @@ function render(state) {
     if (state.ranks[agent - 1] !== 1) return;
     const d = state.directions[k];
     const anchor = state.agents[agent - 1];
-    const reach = 1.4 * state.arena[0];
+    const reach = 2.8 * half[0];
     // Held well back: these are construction lines, and at full strength Pi Mile competes
     // with the white target for attention.
     ctx.save();
