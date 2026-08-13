@@ -243,6 +243,34 @@ end
 @printf("all-rank-2 ring == build_escort_ring : %s\n",
         build_projection_escort_ring(NA, TV, R; ranks = fill(2, NA)) == build_escort_ring(NA, TV, R; D = 3))
 
+# ## The same question, asked of the wiring
+#
+# Observation is only half of it. `consensus_edges` selects which pairs of agents are wired
+# together — the cycle is merely the default — and cutting those edges costs the formation
+# degrees of freedom in exactly the same currency.
+
+wiring_cases = [("full cycle", [(i, i % NA + 1) for i in 1:NA]),
+                ("cycle − 1 edge (a path)", [(i, i % NA + 1) for i in 1:NA if i != 1]),
+                ("cycle − 2 edges (split)", [(i, i % NA + 1) for i in 1:NA if i ∉ (1, 4)]),
+                ("no consensus edges", Tuple{Int,Int}[])]
+for (label, wiring) in wiring_cases
+    s = build_projection_escort_ring(NA, TV, R; observers = [1, 3, 5], consensus_edges = wiring)
+    _, nb = harmonic_extension(s, Dict(TV => [0.55, -0.30, 1.0]))
+    @printf("%-24s (%d edges) → %2d undetermined direction(s)\n", label, length(wiring), size(nb, 2))
+end
+
+# A cycle is one edge more than rigidity needs: cut one and the remaining path fixes the
+# shape just as well. Cut a second, opposite the first, and the fleet falls into two halves
+# that are free to drift apart — one new undetermined direction, exactly as if an observer
+# had been switched off. Removing the wiring entirely leaves each agent to its own devices:
+# the three rank-1 agents keep one free direction apiece and the three that observe nothing
+# are free in all three of their coordinates, for twelve in total.
+#
+# The point is that *do the agents see enough?* and *do they talk to enough of each other?*
+# are not two problems. They are one quadratic form, and its null space answers both.
+#
+# ## Back to observation
+#
 # A single rank-1 observer leaves exactly one direction free, and it is the translation
 # perpendicular to that agent's bisector:
 

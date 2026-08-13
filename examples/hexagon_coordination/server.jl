@@ -66,6 +66,16 @@ function handle_message(state::DemoState, raw)
         haskey(message, :ranks) && set_ranks!(state, Int.(collect(message.ranks)))
     elseif action == "ranks_all"
         toggle_all_ranks!(state)
+    elseif action == "connect"
+        haskey(message, :from) && haskey(message, :to) &&
+            connect_agents!(state, Int(message.from), Int(message.to))
+    elseif action == "disconnect"
+        haskey(message, :from) && haskey(message, :to) &&
+            disconnect_agents!(state, Int(message.from), Int(message.to))
+    elseif action == "reset_edges"
+        reset_edges!(state)
+    elseif action == "ghosts"
+        toggle_ghosts!(state)
     elseif action == "gain"
         adjust_gain!(state, Float64(get(message, :factor, 1.0)))
     elseif action == "feedforward"

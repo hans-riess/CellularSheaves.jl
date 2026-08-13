@@ -5,23 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hexagon Coordination Sheaf</title>
 <style>
+  /* Georgia Tech brand palette (brand.gatech.edu/our-look/colors). Navy Blue, Tech Gold
+     and White are primary; Gray Matter, Pi Mile, Diploma and Buzz Gold secondary. The
+     tertiary accents -- Olympic Teal, New Horizon, Impact Purple -- are held to thin
+     construction lines, in keeping with their "no more than 10% of a design" guidance. */
   :root {
-    --bg: #f6f5f2;
-    --panel: #ffffff;
-    --ink: #1c1c1c;
-    --muted: #6b6b6b;
-    --line: #d8d5cf;
-    --agent: #2a6fb5;
-    --observer: #c8442c;
-    --bisector: #3d9970;
-    --full: #8250c8;
-    --ghost: #a8a8a8;
+    --bg: #F9F6E5;        /* Diploma */
+    --panel: #FFFFFF;     /* White */
+    --ink: #003057;       /* Navy Blue */
+    --muted: #54585A;     /* Gray Matter */
+    --line: #D6DBD4;      /* Pi Mile */
+    --agent: #003057;     /* Navy Blue */
+    --target: #EAAA00;    /* Buzz Gold */
+    --bisector: #008C95;  /* Olympic Teal */
+    --observer: #E04F39;  /* New Horizon */
+    --full: #5F249F;      /* Impact Purple */
+    --ghost: #B3A369;     /* Tech Gold */
   }
   @media (prefers-color-scheme: dark) {
+    /* GT publishes no dark palette, so the marks lighten far enough to hold contrast on a
+       deep-navy ground while keeping each hue recognisably its brand colour. */
     :root {
-      --bg: #16181c; --panel: #1e2126; --ink: #e8e6e3; --muted: #9a9a9a;
-      --line: #343941; --agent: #62a8e8; --observer: #f0765c;
-      --bisector: #63c295; --full: #a982e8; --ghost: #6e7681;
+      --bg: #0A1622; --panel: #12222F; --ink: #F9F6E5; --muted: #9BA6AD;
+      --line: #24384A; --agent: #4E7FD1; --target: #FFCD00;
+      --bisector: #64CCC9; --observer: #E86A55; --full: #9B6FD4; --ghost: #B3A369;
     }
   }
   * { box-sizing: border-box; }
@@ -117,20 +124,27 @@
       <dt>0</dt><dd>all to rank 0 (again to restore)</dd>
       <dt>[ ]</dt><dd>agent gain down / up</dd>
       <dt>F</dt><dd>feedforward 0 → ½ → 1</dd>
+      <dt>G</dt><dd>show / hide the reference q*</dd>
+      <dt>E</dt><dd>restore the ring wiring</dd>
       <dt>R</dt><dd>record the target path</dd>
       <dt>enter</dt><dd>save the recording as CSV</dd>
       <dt>space</dt><dd>reset</dd>
+    </dl>
+    <h2 style="margin-top:12px">Mouse</h2>
+    <dl>
+      <dt>drag</dt><dd>agent to agent, to wire them together</dd>
+      <dt>click</dt><dd>an edge, to cut it</dd>
     </dl>
   </div>
 
   <div class="card">
     <h2>Legend</h2>
     <ul class="legend">
-      <li><span class="swatch" style="background:var(--agent)"></span>ring edges — fixed displacements</li>
+      <li><span class="swatch" style="background:var(--agent)"></span>consensus edges — fixed displacements</li>
       <li><span class="swatch" style="background:var(--bisector)"></span>bisector line — a rank-1 agent</li>
       <li><span class="swatch" style="background:var(--observer)"></span>what a rank-1 agent sees</li>
       <li><span class="swatch" style="background:var(--full)"></span>full sight line — a rank-2 agent</li>
-      <li><span class="swatch" style="background:var(--ghost)"></span>harmonic reference q*</li>
+      <li><span class="swatch" style="background:var(--ghost)"></span>harmonic reference q* — hidden, press <b>G</b></li>
     </ul>
   </div>
 
@@ -148,6 +162,12 @@
     </p>
     <p>
       Press <b>0</b> for no tracking at all: the ring keeps its shape and stops following you.
+    </p>
+    <p>
+      Now cut wiring instead. Click one edge — nothing happens, a path holds the shape just
+      as well as a cycle. Click the edge opposite it and the fleet splits into two halves
+      free to drift apart. Seeing enough and talking to enough of each other are separate
+      questions, and the same readout answers both.
     </p>
   </div>
 
@@ -239,6 +259,8 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "BracketLeft") { send({ action: "gain", factor: 1 / 1.25 }); return; }
   if (event.code === "BracketRight") { send({ action: "gain", factor: 1.25 }); return; }
   if (event.code === "Digit0") { send({ action: "ranks_all" }); return; }
+  if (event.code === "KeyG") { send({ action: "ghosts" }); return; }
+  if (event.code === "KeyE") { send({ action: "reset_edges" }); return; }
 
   const digit = /^Digit([1-6])$/.exec(event.code);
   if (digit) send({ action: "rank", agent: Number(digit[1]) });
@@ -268,6 +290,100 @@ function makeTransform(arena) {
   project.scale = scale;
   return project;
 }
+
+// ---- editing the consensus topology --------------------------------------------------
+// Click an edge to cut it; drag from one agent to another to wire them together.
+
+let dragFrom = null;      // agent index a drag started on, 1-based
+let dragPoint = null;     // where the pointer is now, in world units
+let hoverEdge = null;     // index into state.edges, for highlight + cursor feedback
+
+// Pointer position in world units. The backing store is in device pixels while the event
+// is in CSS pixels, so the ratio between them has to come out.
+function pointerWorld(event) {
+  if (!frame) return null;
+  const box = canvas.getBoundingClientRect();
+  const px = (event.clientX - box.left) * (canvas.width / box.width);
+  const py = (event.clientY - box.top) * (canvas.height / box.height);
+  const scale = Math.min(canvas.width / frame.arena[0], canvas.height / frame.arena[1]);
+  return [(px - canvas.width / 2) / scale, (canvas.height / 2 - py) / scale];
+}
+
+function agentAt(world) {
+  if (!frame || !world) return null;
+  const reach = 0.5 * frame.radius;
+  let best = null, bestDistance = reach;
+  frame.agents.forEach((p, i) => {
+    const distance = Math.hypot(p[0] - world[0], p[1] - world[1]);
+    if (distance < bestDistance) { best = i + 1; bestDistance = distance; }
+  });
+  return best;
+}
+
+function edgeAt(world) {
+  if (!frame || !world) return null;
+  const reach = 0.16 * frame.radius;
+  let best = null, bestDistance = reach;
+  frame.edges.forEach(([a, b], k) => {
+    const p = frame.agents[a - 1], q = frame.agents[b - 1];
+    const vx = q[0] - p[0], vy = q[1] - p[1];
+    const len2 = vx * vx + vy * vy;
+    // Distance from the point to the segment, not to the infinite line.
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((world[0] - p[0]) * vx + (world[1] - p[1]) * vy) / len2));
+    const distance = Math.hypot(p[0] + t * vx - world[0], p[1] + t * vy - world[1]);
+    if (distance < bestDistance) { best = k; bestDistance = distance; }
+  });
+  return best;
+}
+
+canvas.addEventListener("pointerdown", (event) => {
+  const world = pointerWorld(event);
+  const agent = agentAt(world);
+  if (agent !== null) {
+    dragFrom = agent;
+    dragPoint = world;
+    canvas.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+});
+
+canvas.addEventListener("pointermove", (event) => {
+  const world = pointerWorld(event);
+  if (dragFrom !== null) {
+    dragPoint = world;
+    canvas.style.cursor = "grabbing";
+  } else {
+    hoverEdge = agentAt(world) === null ? edgeAt(world) : null;
+    canvas.style.cursor = agentAt(world) !== null ? "grab" : hoverEdge !== null ? "pointer" : "default";
+  }
+  if (frame) render(frame);
+});
+
+canvas.addEventListener("pointerup", (event) => {
+  const world = pointerWorld(event);
+  if (dragFrom !== null) {
+    const landed = agentAt(world);
+    if (landed !== null && landed !== dragFrom) {
+      send({ action: "connect", from: dragFrom, to: landed });
+    }
+    dragFrom = null;
+    dragPoint = null;
+    canvas.style.cursor = "default";
+    return;
+  }
+  // A plain click on an edge cuts it.
+  const k = edgeAt(world);
+  if (k !== null && frame) {
+    const [a, b] = frame.edges[k];
+    send({ action: "disconnect", from: a, to: b });
+    hoverEdge = null;
+  }
+});
+
+canvas.addEventListener("pointerleave", () => {
+  hoverEdge = null;
+  canvas.style.cursor = "default";
+});
 
 function line(a, b, stroke, width, dash = []) {
   ctx.save();
@@ -337,17 +453,28 @@ function render(state) {
     ctx.restore();
   }
 
-  // Ring edges: the fixed-displacement constraints.
-  for (let i = 0; i < state.agents.length; i++) {
-    const j = (i + 1) % state.agents.length;
-    line(toPixels(state.agents[i]), toPixels(state.agents[j]), color("--agent"), 0.0155 * u);
+  // Consensus edges: the fixed-displacement constraints. These are editable, so the one
+  // under the cursor lights up.
+  state.edges.forEach(([a, b], k) => {
+    const hot = hoverEdge === k;
+    line(toPixels(state.agents[a - 1]), toPixels(state.agents[b - 1]),
+         hot ? color("--observer") : color("--agent"), (hot ? 0.032 : 0.0155) * u);
+  });
+
+  // An edge being dragged into existence.
+  if (dragFrom !== null && dragPoint !== null) {
+    line(toPixels(state.agents[dragFrom - 1]), toPixels(dragPoint),
+         color("--ghost"), 0.022 * u, [0.09 * u, 0.07 * u]);
   }
 
-  // Harmonic reference, as hollow ghosts.
-  ctx.save();
-  ctx.globalAlpha = 0.75;
-  for (const p of state.reference) disc(toPixels(p), 0.066 * u, null, color("--ghost"), 0.0116 * u);
-  ctx.restore();
+  // Harmonic reference, as hollow rings. Off by default: whenever tracking is tight they
+  // sit directly on top of the agents and read as clutter.
+  if (state.show_ghosts) {
+    ctx.save();
+    ctx.globalAlpha = 0.8;
+    for (const p of state.reference) disc(toPixels(p), 0.066 * u, null, color("--ghost"), 0.0116 * u);
+    ctx.restore();
+  }
 
   // What each observer actually measures. A rank-1 agent gets the target's foot on its
   // bisector — one number. A rank-2 agent gets the target itself, drawn as a solid sight
@@ -379,7 +506,9 @@ function render(state) {
 
   const target = toPixels(state.target);
   ctx.save();
-  ctx.fillStyle = color("--ink");
+  ctx.fillStyle = color("--target");
+  ctx.strokeStyle = color("--ink");
+  ctx.lineWidth = 0.016 * u;
   ctx.beginPath();
   for (let k = 0; k < 10; k++) {
     const radius = (k % 2 === 0 ? 0.085 : 0.035) * u;
@@ -389,6 +518,7 @@ function render(state) {
   }
   ctx.closePath();
   ctx.fill();
+  ctx.stroke();
   ctx.restore();
 
   out.obs.textContent = state.ranks.join("·");

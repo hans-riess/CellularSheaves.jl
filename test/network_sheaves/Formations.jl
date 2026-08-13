@@ -192,6 +192,41 @@ using LinearAlgebra
         end
     end
 
+    @testset "build_projection_escort_ring — consensus edges are configurable" begin
+        R = 0.35
+        boundary = Dict(7 => [0.55, -0.30, 1.0])
+        cycle = [(i, i % 6 + 1) for i in 1:6]
+        nullity(edges, ranks) = size(harmonic_extension(
+            build_projection_escort_ring(6, 7, R; ranks=ranks, consensus_edges=edges), boundary)[2], 2)
+
+        # The default is the cycle.
+        @test build_projection_escort_ring(6, 7, R) ==
+              build_projection_escort_ring(6, 7, R; consensus_edges=cycle)
+        # Orientation is irrelevant — the edges are unordered.
+        @test build_projection_escort_ring(6, 7, R; consensus_edges=reverse.(cycle)) ==
+              build_projection_escort_ring(6, 7, R; consensus_edges=cycle)
+
+        observers = [1, 0, 1, 0, 1, 0]
+        # A cycle is more wiring than rigidity needs: cutting one edge leaves a path, which
+        # still fixes the shape. Cutting a second splits the fleet in two, and the halves
+        # are then free to drift apart.
+        @test nullity(cycle, observers) == 0
+        @test nullity(filter(!=((1, 2)), cycle), observers) == 0
+        @test nullity(filter(e -> e ∉ ((1, 2), (4, 5)), cycle), observers) == 1
+        # ... and worse when the observers all sit on one side of the cut.
+        @test nullity(filter(e -> e ∉ ((1, 2), (4, 5)), cycle), [1, 0, 1, 0, 0, 0]) == 2
+
+        # With no wiring at all each agent stands alone: the three rank-1 agents keep one
+        # free direction apiece, and the three that observe nothing are entirely free.
+        @test nullity(Tuple{Int,Int}[], observers) == 3 * 1 + 3 * 3
+        # Unless every agent sees the target for itself, in which case wiring is redundant.
+        @test nullity(Tuple{Int,Int}[], fill(2, 6)) == 0
+
+        @test_throws Exception build_projection_escort_ring(6, 7, R; consensus_edges=[(1, 1)])
+        @test_throws Exception build_projection_escort_ring(6, 7, R; consensus_edges=[(1, 2), (2, 1)])
+        @test_throws Exception build_projection_escort_ring(6, 7, R; consensus_edges=[(1, 7)])
+    end
+
     @testset "build_projection_escort_ring — every agent at rank 0" begin
         R = 0.35
         # A ring that observes nothing is a legitimate sheaf, not an error: the target

@@ -25,6 +25,7 @@ using CellularSheaves
 using LinearAlgebra
 
 export DemoState, step!, snapshot, cycle_rank!, set_ranks!, toggle_all_ranks!,
+       connect_agents!, disconnect_agents!, reset_edges!, toggle_ghosts!,
        adjust_gain!, cycle_feedforward!, reset!, toggle_recording!, save_track
 
 const N_AGENTS = 6
@@ -63,6 +64,8 @@ mutable struct DemoState
     radius::Float64
     ranks::Vector{Int}
     restore_ranks::Vector{Int}
+    edges::Vector{Tuple{Int,Int}}
+    show_ghosts::Bool
     sheaf::EuclideanSheaf{Float64}
     offsets::Vector{Vector{Float64}}
     directions::Vector{Vector{Float64}}
@@ -82,6 +85,7 @@ end
 function DemoState(; ranks::AbstractVector{<:Integer}=[i % 2 == 1 ? 1 : 0 for i in 1:N_AGENTS],
                    radius::Real=RADIUS)
     state = DemoState(Float64(radius), zeros(Int, N_AGENTS), zeros(Int, N_AGENTS),
+                      _cycle_edges(), false,
                       EuclideanSheaf{Float64}(fill(D, TARGET_VERTEX)),
                       Vector{Float64}[], Vector{Float64}[], zeros(0, 0),
                       Vector{Float64}[], Vector{Float64}[],
@@ -95,26 +99,94 @@ function DemoState(; ranks::AbstractVector{<:Integer}=[i % 2 == 1 ? 1 : 0 for i 
     return state
 end
 
+_cycle_edges() = [(i, i % N_AGENTS + 1) for i in 1:N_AGENTS]
+
+_normalise(a, b) = (min(Int(a), Int(b)), max(Int(a), Int(b)))
+
+# Rebuild the sheaf from the current ranks and wiring, and re-cache its null space. The
+# null space depends only on the topology, not on where the target is, so it is computed
+# here rather than every frame.
+function _rebuild!(state::DemoState)
+    previous = (state.sheaf, state.null_basis)
+    try
+        state.sheaf = build_projection_escort_ring(N_AGENTS, TARGET_VERTEX, state.radius;
+                                                   ranks=state.ranks, D=D,
+                                                   consensus_edges=state.edges)
+        _, null_basis = harmonic_extension(state.sheaf, Dict(TARGET_VERTEX => [0.0, 0.0, 1.0]))
+        state.null_basis = _orthonormal(null_basis[1:N_AGENTS*D, :])
+    catch err
+        # A mouse can reach topologies a keyboard could not -- every edge cut and every
+        # rank zeroed leaves a sheaf with no edges at all, and the factorisation of an
+        # entirely zero Laplacian is a corner the solver need not be expected to enjoy.
+        # Keep the session alive on the previous topology rather than dropping the socket.
+        @warn "could not rebuild the sheaf; keeping the previous topology" exception = err
+        state.sheaf, state.null_basis = previous
+    end
+    return state
+end
+
 """
     set_ranks!(state, ranks) -> DemoState
 
-Rebuild the sheaf for a new per-agent rank vector and recompute its null space.
+Rebuild the sheaf for a new per-agent rank vector.
 
-The null space depends only on the topology, not on where the target is, so it is cached
-here rather than recomputed every frame. Out-of-range entries are clamped rather than
-rejected: this is driven by a keyboard, and a bad keystroke should not kill the session.
+Out-of-range entries are clamped rather than rejected: this is driven by a keyboard and a
+mouse, and a stray input should not kill the session.
 """
 function set_ranks!(state::DemoState, ranks::AbstractVector{<:Integer})
     wanted = [clamp(Int(r), 0, MAX_RANK) for r in ranks]
     length(wanted) == N_AGENTS || return state
-
     state.ranks = wanted
-    state.sheaf = build_projection_escort_ring(N_AGENTS, TARGET_VERTEX, state.radius;
-                                               ranks=wanted, D=D)
-    _, null_basis = harmonic_extension(state.sheaf, Dict(TARGET_VERTEX => [0.0, 0.0, 1.0]))
-    state.null_basis = _orthonormal(null_basis[1:N_AGENTS*D, :])
-    return state
+    return _rebuild!(state)
 end
+
+"""
+    connect_agents!(state, a, b) -> DemoState
+
+Wire two agents together with a consensus edge. A no-op if they already share one, or if
+either index is out of range.
+"""
+function connect_agents!(state::DemoState, a::Integer, b::Integer)
+    (1 <= a <= N_AGENTS && 1 <= b <= N_AGENTS && a != b) || return state
+    edge = _normalise(a, b)
+    edge in state.edges && return state
+    push!(state.edges, edge)
+    return _rebuild!(state)
+end
+
+"""
+    disconnect_agents!(state, a, b) -> DemoState
+
+Remove the consensus edge between two agents, if there is one.
+
+Cutting edges is as consequential as lowering an observation rank, and shows up the same
+way: a cycle survives one cut as a path, but a second cut splits the fleet into halves that
+are free to drift apart, and `harmonic_extension` reports the extra freedom as null-space
+columns.
+"""
+function disconnect_agents!(state::DemoState, a::Integer, b::Integer)
+    edge = _normalise(a, b)
+    index = findfirst(==(edge), state.edges)
+    index === nothing && return state
+    deleteat!(state.edges, index)
+    return _rebuild!(state)
+end
+
+"""    reset_edges!(state) -> DemoState
+
+Restore the original ring wiring.
+"""
+function reset_edges!(state::DemoState)
+    state.edges = _cycle_edges()
+    return _rebuild!(state)
+end
+
+"""    toggle_ghosts!(state) -> Bool
+
+Show or hide the harmonic reference markers. Off by default — they sit on top of the agents
+whenever tracking is tight, which is most of the time.
+"""
+toggle_ghosts!(state::DemoState) = (state.show_ghosts = !state.show_ghosts)
 
 """
     cycle_rank!(state, agent) -> DemoState
@@ -179,6 +251,7 @@ function reset!(state::DemoState)
     state.velocity = zeros(2)
     state.command = zeros(2)
     state.time = 0.0
+    reset_edges!(state)
     scatter = 1.6 * state.radius
     state.positions = [scatter .* [cos((i - 0.5) * 2π / N_AGENTS), sin((i - 0.5) * 2π / N_AGENTS)]
                        for i in 1:N_AGENTS]
@@ -325,7 +398,9 @@ function snapshot(state::DemoState)
         arena = (ARENA_X, ARENA_Y),
         agents = state.positions,
         reference = state.reference,
+        show_ghosts = state.show_ghosts,
         target = state.target,
+        edges = [collect(e) for e in state.edges],
         ranks = state.ranks,
         observers = observers,
         directions = [state.directions[i] for i in observers],
@@ -344,6 +419,7 @@ end
 # Sheaf Dirichlet energy of the *actual* agent configuration -- how far the fleet is from
 # satisfying its own coordination constraints right now.
 function _energy(state::DemoState)
+    isempty(state.edges) && all(iszero, state.ranks) && return 0.0
     x = vcat([vcat(p, 1.0) for p in state.positions]..., vcat(state.target, 1.0))
     return round(sum(abs2, coboundary_map(state.sheaf) * x); sigdigits=4)
 end

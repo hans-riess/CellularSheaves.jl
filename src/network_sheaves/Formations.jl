@@ -330,11 +330,25 @@ has.
 - `observers`: shorthand for "these agents at rank 1, the rest at rank 0".
 - `ranks`: the full per-agent rank vector, length `n_agents`, entries in `0`, `1`, `D-1`.
   Mutually exclusive with `observers`.
+- `consensus_edges`: which pairs of agents are wired together. Defaults to the cycle
+  `(1,2), (2,3), …, (n,1)`. Any list of distinct unordered pairs is accepted, including
+  ones that leave the formation floppy or disconnected — the geometry (where agents sit)
+  and the topology (who talks to whom) are independent here, exactly as in
+  [`build_escort_topology`](@ref).
 - `D`: vertex stalk dimension — `D-1` translation coordinates plus one homogeneous
   coordinate. `D = 3` is planar; `D = 4` matches the SE(3) escort convention.
+
+# Rigidity is not assumed
+
+The cycle makes the formation rigid, so the free configuration space is just its centre.
+Remove edges and that stops being true: a path still fixes the shape, but cutting it in two
+leaves two groups free to drift apart, and an isolated agent is unconstrained entirely.
+Those are legitimate sheaves, and the extra freedom shows up the same way partial
+observation does — as extra columns in `harmonic_extension`'s null-space basis.
 """
 function build_projection_escort_ring(n_agents::Int, target_node::Int, radius::Real;
-                                      observers=1:2:n_agents, ranks=nothing, D::Int=3)
+                                      observers=1:2:n_agents, ranks=nothing,
+                                      consensus_edges=nothing, D::Int=3)
     @argcheck n_agents >= 3 "n_agents must be >= 3 for a non-degenerate ring (got $n_agents)"
     @argcheck D >= 3 "D must be >= 3: at least two translation coordinates plus a homogeneous one (got $D)"
     @argcheck radius > 0 "radius must be positive to define a bisector direction (got $radius)"
@@ -351,6 +365,16 @@ function build_projection_escort_ring(n_agents::Int, target_node::Int, radius::R
         collect(Int.(ranks))
     end
 
+    wiring = if consensus_edges === nothing
+        [(i, i % n_agents + 1) for i in 1:n_agents]
+    else
+        pairs = [(min(Int(a), Int(b)), max(Int(a), Int(b))) for (a, b) in consensus_edges]
+        @argcheck all(1 <= a && b <= n_agents for (a, b) in pairs) "consensus_edges must join agents in 1:n_agents"
+        @argcheck all(a != b for (a, b) in pairs) "consensus_edges must not contain self-loops"
+        @argcheck allunique(pairs) "consensus_edges must not repeat a pair"
+        pairs
+    end
+
     total_nodes = max(n_agents, target_node)
     sheaf = EuclideanSheaf{Float64}(fill(D, total_nodes))
 
@@ -364,8 +388,7 @@ function build_projection_escort_ring(n_agents::Int, target_node::Int, radius::R
     directions = bisector_directions(n_agents; trans_dim=trans_dim)
     frames = affine_translation_matrix.(offsets)
 
-    for i in 1:n_agents
-        j = i % n_agents + 1
+    for (i, j) in wiring
         add_sheaf_edge!(sheaf, i, j, frames[i], frames[j])
     end
 

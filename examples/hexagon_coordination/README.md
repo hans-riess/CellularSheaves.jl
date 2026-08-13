@@ -50,9 +50,34 @@ agents already hold. "Undetermined" means stay put, not jump somewhere arbitrary
 | `0` | drop every agent to rank 0 (press again to restore) |
 | `[` `]` | agent gain down / up |
 | `F` | feedforward 0 → ½ → 1 |
+| `G` | show / hide the harmonic reference `q*` (hidden by default) |
+| `E` | restore the ring wiring |
 | `R` | start / stop recording the target's path |
 | `enter` | save the recording as CSV under `tracks/` |
 | `space` | reset |
+
+| Mouse | Action |
+|---|---|
+| drag agent → agent | wire the two together with a consensus edge |
+| click an edge | cut it |
+
+## Wiring is editable too, and it degrades the same way
+
+The consensus edges are not fixed at a ring. Cutting them costs the formation degrees of
+freedom exactly as lowering an observation rank does, and the same readout reports it:
+
+| wiring (observers 1, 3, 5 at rank 1) | undetermined directions |
+|---|---|
+| full cycle | 0 |
+| cycle − 1 edge (a path) | 0 — still rigid |
+| cycle − 2 edges (split in half) | 1 — the halves drift apart |
+| ... with every observer on one side of the cut | 2 |
+| no consensus edges at all | 12 |
+| no consensus edges, every agent at rank 2 | 0 — wiring is then redundant |
+
+So the cycle turns out to be one edge more than rigidity actually needs, which you can
+discover by clicking. *Do the agents see enough?* and *do they talk to enough of each
+other?* are different questions, and the null space answers both at once.
 
 ## Why the ring lags
 
