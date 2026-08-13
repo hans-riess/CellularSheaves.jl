@@ -361,13 +361,14 @@ canvas.addEventListener("pointerup", (event) => {
     dragFrom = null;
     dragPoint = null;
     canvas.style.cursor = "default";
-    if (moved) {
-      if (landed !== null && landed !== from) {
-        send({ action: "connect", from, to: landed });
-      }
+    if (moved && landed !== null && landed !== from) {
+      send({ action: "connect", from, to: landed });
       return;
     }
-    // Stationary press on an agent: fall through and treat it as a click.
+    // Anything else -- a press that never moved, or a drag that ended nowhere in
+    // particular -- is a click, and falls through to the cut/add logic below. Requiring a
+    // *completed* agent-to-agent drag to wire means the movement threshold can never eat a
+    // cut, which it otherwise does whenever a click jitters a few pixels on a trackpad.
   }
   // A plain click cuts an edge, or drops a new agent on empty board.
   const k = edgeAt(world);

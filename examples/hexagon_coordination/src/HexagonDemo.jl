@@ -494,32 +494,52 @@ function snapshot(state::DemoState)
     )
 end
 
-# A straight bar through a centroid honestly depicts one thing: a *translation* that costs
-# no energy. A null space can hold other modes too -- a uniform dilation, or two halves of a
-# split fleet drifting relative to one another -- and drawing those as a bar would claim
-# something false. So a mode earns a bar only when the agents it moves all move together,
-# and the bar is drawn through the centroid of just those agents.
+# A bar asserts one specific thing: *this line, and no other, is free*. That is true of an
+# agent whose translational freedom is one-dimensional -- the classic case of a single
+# rank-1 observer, where everything may slide along the direction its lone reading cannot
+# pin. It is false of an agent with no observation at all, which is free in the whole plane
+# and has no distinguished direction; the null basis merely happens to pick two, and drawing
+# them would dress an arbitrary choice up as structure.
 #
-# When the null space is large its basis is an arbitrary orthonormal mixture, so typically
-# no single column is a clean translation and nothing is drawn. That is the honest outcome:
-# the readout still reports how many directions are free, and declines to draw lines it
-# cannot justify.
+# So: intersect the null space with the pure translations, ask each agent how many
+# dimensions of that intersection it actually moves in, and draw a bar only for the agents
+# whose answer is exactly one. Agents sharing a direction are drawn as a single bar through
+# their common centroid.
 function _translation_bars(state::DemoState)
     n = n_agents(state)
     bars = NamedTuple{(:at, :dir),Tuple{Vector{Float64},Vector{Float64}}}[]
     (n == 0 || size(state.null_basis, 2) == 0) && return bars
-    for k in 1:size(state.null_basis, 2)
-        v = state.null_basis[:, k]
-        parts = [v[D*(i-1)+1:D*(i-1)+2] for i in 1:n]
-        scale = maximum(norm, parts)
+
+    N = state.null_basis
+    translations = zeros(n * D, 2n)
+    for i in 1:n, j in 1:2
+        translations[D * (i - 1) + j, 2 * (i - 1) + j] = 1.0
+    end
+    # What is left of each translation after removing its component inside the null space;
+    # a translation is free exactly when nothing is left over.
+    outside = translations .- N * (N' * translations)
+    factors = svd(outside)
+    tol = 1e-7 * max(1.0, maximum(factors.S; init = 0.0))
+    free = findall(<(tol), factors.S)
+    isempty(free) && return bars
+    coefficients = factors.V[:, free]
+
+    groups = Tuple{Vector{Float64},Vector{Int}}[]
+    for i in 1:n
+        block = coefficients[2 * (i - 1) + 1 : 2i, :]
+        size(block, 2) == 0 && continue
+        local_factors = svd(block)
+        scale = maximum(local_factors.S; init = 0.0)
         scale < 1e-9 && continue
-        moving = [i for i in 1:n if norm(parts[i]) > 0.05 * scale]
-        isempty(moving) && continue
-        head = parts[first(moving)]
-        all(norm(parts[i] - head) < 1e-6 for i in moving) || continue
-        all(abs(v[D*i]) < 1e-6 for i in 1:n) || continue
-        at = sum(state.positions[i] for i in moving) ./ length(moving)
-        push!(bars, (at = at, dir = head ./ norm(head)))
+        count(>(1e-7 * scale), local_factors.S) == 1 || continue   # 2 means the whole plane
+        direction = local_factors.U[:, 1]
+        matched = findfirst(g -> abs(dot(g[1], direction)) > 1 - 1e-6, groups)
+        matched === nothing ? push!(groups, (direction, [i])) : push!(groups[matched][2], i)
+    end
+
+    for (direction, members) in groups
+        at = sum(state.positions[i] for i in members) ./ length(members)
+        push!(bars, (at = at, dir = direction))
     end
     return bars
 end
