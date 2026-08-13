@@ -4,7 +4,7 @@ using LinearAlgebra
 using ..EuclideanSheaves: EuclideanSheaf, add_sheaf_edge!
 using ArgCheck: @argcheck
 
-export se3_translation_matrix, se3_rotation_matrix, se3_affine_matrix, affine_translation_matrix, build_escort_topology, build_escort_ring, build_escort_clique
+export se3_translation_matrix, se3_rotation_matrix, se3_affine_matrix, affine_translation_matrix, build_escort_topology, build_escort_ring, build_escort_clique, bisector_directions, build_projection_escort_ring
 
 """
     se3_translation_matrix(d::AbstractVector)
@@ -184,5 +184,313 @@ that docstring for the full explanation of the geometry/topology split, `D`, and
 """
 build_escort_clique(n_agents::Int, target_node::Int, radius::Float64; observers=1:n_agents, D::Int=4, affine::Bool=true) =
     build_escort_topology(:clique, n_agents, target_node, radius; observers, D, affine)
+
+"""
+    bisector_directions(n_agents::Int; trans_dim::Int=2) -> Vector{Vector{Float64}}
+
+Inward unit vectors along the *angle bisector* at each vertex of a regular `n_agents`-gon.
+
+The bisector at vertex `i` is the line through agent `i` making congruent angles to its two
+ring neighbours `i-1` and `i+1`. For a regular polygon that line is the radial one, so the
+bisector direction is simply
+
+```math
+u_i = -d_i / r, \\qquad d_i = r\\,(\\cos\\theta_i, \\sin\\theta_i), \\quad \\theta_i = 2\\pi(i-1)/n
+```
+
+pointing from agent `i` toward the centre. The result is independent of the radius. Vectors
+are returned in `trans_dim` coordinates with the bisector living in the first two and zeros
+elsewhere, matching the offset convention of [`build_escort_topology`](@ref).
+"""
+function bisector_directions(n_agents::Int; trans_dim::Int=2)
+    @argcheck n_agents >= 3 "n_agents must be >= 3 (got $n_agents)"
+    @argcheck trans_dim >= 2 "trans_dim must be >= 2 to carry a planar bisector (got $trans_dim)"
+    map(1:n_agents) do i
+        angle = (i - 1) * 2π / n_agents
+        u = zeros(trans_dim)
+        u[1] = -cos(angle)
+        u[2] = -sin(angle)
+        return u
+    end
+end
+
+"""
+    bisector_directions(offsets::AbstractVector{<:AbstractVector}) -> Vector{Vector{Float64}}
+
+Interior angle bisectors of an arbitrary formation, one per vertex.
+
+The bisector at vertex `i` is the direction that makes congruent angles with the rays to
+its two neighbours **in cyclic index order** — `i-1` and `i+1`, wrapping around — and it is
+computed the usual way, by adding the two unit rays:
+
+```math
+u_i \\;=\\; \\mathrm{normalize}\\!\\left(
+  \\frac{d_{i-1} - d_i}{\\|d_{i-1} - d_i\\|} + \\frac{d_{i+1} - d_i}{\\|d_{i+1} - d_i\\|}\\right)
+```
+
+Note the cyclic order is the order of `offsets` itself, **not** the consensus wiring. The
+two are independent — the geometry says what shape the formation holds, the topology says
+who talks to whom — so the bisector at a vertex is well defined even when that vertex has
+no consensus edges at all, which is what makes an interactively built formation workable.
+
+For a regular polygon this reproduces [`bisector_directions(n_agents)`](@ref) exactly, since
+there the angle bisector *is* the inward radial direction.
+
+# Degenerate vertices
+
+Two cases have no angle to bisect, and both fall back to pointing at the formation's
+centroid — the natural generalisation of "inward", and what the regular case reduces to:
+
+- a **straight** vertex, where the two neighbours are collinear with it, so the rays cancel;
+- a vertex **coincident** with one of its neighbours, where a ray has no direction at all.
+
+A formation of fewer than three vertices has no interior angles either, and takes the same
+fallback throughout.
+"""
+function bisector_directions(offsets::AbstractVector{<:AbstractVector{<:Real}})
+    n = length(offsets)
+    @argcheck n >= 1 "need at least one offset"
+    trans_dim = length(first(offsets))
+    @argcheck all(length(d) == trans_dim for d in offsets) "every offset must have the same length"
+
+    centroid = sum(offsets) ./ n
+    inward(here) = begin
+        toward = centroid .- here
+        norm(toward) > 1e-12 ? toward ./ norm(toward) :
+            Float64[k == 1 ? 1.0 : 0.0 for k in 1:trans_dim]
+    end
+
+    map(1:n) do i
+        here = Float64.(offsets[i])
+        n < 3 && return inward(here)
+        back = Float64.(offsets[mod1(i - 1, n)]) .- here
+        forth = Float64.(offsets[mod1(i + 1, n)]) .- here
+        nb, nf = norm(back), norm(forth)
+        (nb < 1e-12 || nf < 1e-12) && return inward(here)
+        u = back ./ nb .+ forth ./ nf
+        norm(u) < 1e-9 ? inward(here) : u ./ norm(u)
+    end
+end
+
+"""
+    _observation_selector(rank::Int, direction::AbstractVector, D::Int) -> Matrix{Float64}
+
+The `(rank+1) × D` matrix an agent applies to a stalk `[p; h]` to expose what it observes.
+
+The first `rank` rows carry position information; the last is the *gauge* row `[0 … 0 1]`,
+present at every rank. `rank == 1` reads the single coordinate along `direction`;
+`rank == D-1` reads the position in full, in which case the selector is `I_D` and the
+observation edge coincides with [`build_escort_ring`](@ref)'s identity pin.
+"""
+function _observation_selector(rank::Int, direction::AbstractVector, D::Int)
+    trans_dim = D - 1
+    selector = zeros(rank + 1, D)
+    if rank == 1
+        selector[1, 1:trans_dim] = direction
+    elseif rank == trans_dim
+        selector[1:trans_dim, 1:trans_dim] = I(trans_dim)
+    else
+        throw(ArgumentError("observation rank must be 0, 1, or $trans_dim for D = $D (got $rank)"))
+    end
+    selector[end, D] = 1.0
+    return selector
+end
+
+"""
+    build_projection_escort_ring(n_agents::Int, target_node::Int, radius::Real;
+                                 observers=1:2:n_agents, ranks=nothing, D::Int=3)
+        -> EuclideanSheaf{Float64}
+
+Build an affine escort ring in which each agent observes the target at its own **rank** —
+from nothing at all, through a single scalar along its bisector, up to the full position.
+
+This is the sheaf behind the hexagon coordination demo. [`build_escort_ring`](@ref) pins
+every observer to the target with a full-rank identity map — "agent `i` knows exactly where
+the target is". Here each agent instead carries an **observation rank**:
+
+| rank | edge stalk | what agent `i` knows |
+|---|---|---|
+| `0` | *(no edge)* | nothing at all |
+| `1` | `2` | one scalar, `u_i^\\top p_t`, along its own [`bisector_directions`](@ref) line |
+| `D-1` | `D` | the target's position in full |
+
+so `rank = 1` asserts only
+
+```math
+u_i^\\top (p_i - h_i d_i) = u_i^\\top p_t
+```
+
+while `rank = D-1` recovers `build_escort_ring`'s identity pin exactly. An agent at rank 1
+cannot localise the target on its own; recovering it, and propagating it to the agents at
+rank 0, is exactly the work done by [`harmonic_extension`](@ref) — which is the point of
+the construction.
+
+# Geometry
+
+Agent `i` sits at angle `2π(i-1)/n_agents` and distance `radius` from the formation centre,
+with nominal offset `d_i`. Stalks are homogeneous affine: a vertex cochain is `[p; h]` with
+`p` the position in `D-1` translation coordinates and `h` the homogeneous coordinate. Ring
+edges carry [`affine_translation_matrix`](@ref) offsets, so with `h = 1` edge `(i,j)`
+asserts the fixed displacement `p_i - p_j = d_i - d_j`.
+
+# The observation edge, and why it always carries a gauge row
+
+For an agent at rank `r`, [`_observation_selector`](@ref) builds the `(r+1) × D` matrix
+`S_i` — `r` position rows plus one gauge row — and the edge to `target_node` gets
+
+```julia
+S_i * affine_translation_matrix(d_i)    # agent side
+S_i                                     # target side
+```
+
+The gauge row `[0 … 0 1]` is load-bearing rather than decorative.
+`affine_translation_matrix` scales each offset by `h`, so a formation with `h = 0` has all
+its displacement vectors annihilated and costs zero Dirichlet energy: the ring collapses to
+a point. Dropping the gauge row leaves `h` pinned only up to a constant across the ring, and
+the resulting Laplacian is singular along precisely that uniform dilation mode (the same
+degeneracy discussed in the rescaling-formation example). Keeping it lets the target's
+boundary value `[p_t; 1]` propagate `h = 1` into the formation.
+
+# Rank and degeneracy
+
+The ring is rigid, so the free formation has two translational degrees of freedom (its
+centre) once `h = 1`. The default `observers = 1:2:n_agents` puts every other agent at rank
+1; for a hexagon that is agents `1, 3, 5`, whose directions sit 120° apart and satisfy
+`∑ u_i u_i^\\top = (3/2) I` — an isotropic, perfectly conditioned fusion of the three
+readings.
+
+What determines the formation is not how many scalars are read but whether the directions
+they are read along **span**. For a hexagon:
+
+| ranks | scalar readings | undetermined directions |
+|---|---|---|
+| one agent at rank `2` | 2 | 0 |
+| two agents at rank `1`, diametrically opposite | 2 | 1 |
+| one agent at rank `1` | 1 | 1 |
+| every agent at rank `0` | 0 | 3 |
+
+Two readings suffice in the first case and not the second, because antipodal vertices have
+antiparallel bisectors. Under-determined choices are legitimate inputs and are reported
+rather than rejected: [`harmonic_extension`](@ref) returns the free directions as a
+null-space basis. Note its particular solution is *a* representative of the solution set,
+not the minimum-norm one — with every agent at rank 0 the target vertex is isolated and
+that representative is the collapsed formation at the origin, so a caller wanting a usable
+configuration should pick the point of `x_p + null_basis * c` nearest the one it already
+has.
+
+# Arguments
+
+- `n_agents`: number of agents around the ring; vertices `1:n_agents`.
+- `target_node`: vertex index of the target, pinned as boundary data.
+- `radius`: ring radius. Keep this `O(1)`–`O(10)`; the rank tolerance used for null-space
+  detection is relative to the Laplacian's spectrum, and a very large radius narrows the
+  margin between a true null direction and a merely small eigenvalue.
+- `observers`: shorthand for "these agents at rank 1, the rest at rank 0".
+- `ranks`: the full per-agent rank vector, length `n_agents`, entries in `0`, `1`, `D-1`.
+  Mutually exclusive with `observers`.
+- `consensus_edges`: which pairs of agents are wired together. Defaults to the cycle
+  `(1,2), (2,3), …, (n,1)`. Any list of distinct unordered pairs is accepted, including
+  ones that leave the formation floppy or disconnected — the geometry (where agents sit)
+  and the topology (who talks to whom) are independent here, exactly as in
+  [`build_escort_topology`](@ref).
+- `D`: vertex stalk dimension — `D-1` translation coordinates plus one homogeneous
+  coordinate. `D = 3` is planar; `D = 4` matches the SE(3) escort convention.
+
+# Rigidity is not assumed
+
+The cycle makes the formation rigid, so the free configuration space is just its centre.
+Remove edges and that stops being true: a path still fixes the shape, but cutting it in two
+leaves two groups free to drift apart, and an isolated agent is unconstrained entirely.
+Those are legitimate sheaves, and the extra freedom shows up the same way partial
+observation does — as extra columns in `harmonic_extension`'s null-space basis.
+"""
+function build_projection_escort_ring(n_agents::Int, target_node::Int, radius::Real;
+                                      observers=1:2:n_agents, ranks=nothing,
+                                      consensus_edges=nothing, D::Int=3)
+    @argcheck n_agents >= 3 "n_agents must be >= 3 for a non-degenerate ring (got $n_agents)"
+    @argcheck D >= 3 "D must be >= 3: at least two translation coordinates plus a homogeneous one (got $D)"
+    @argcheck radius > 0 "radius must be positive to define a bisector direction (got $radius)"
+
+    trans_dim = D - 1
+    offsets = map(1:n_agents) do i
+        angle = (i - 1) * 2π / n_agents
+        d = zeros(trans_dim)
+        d[1] = cos(angle) * radius
+        d[2] = sin(angle) * radius
+        return d
+    end
+    return build_projection_escort_ring(offsets, target_node;
+                                        observers=observers, ranks=ranks,
+                                        consensus_edges=consensus_edges, D=D)
+end
+
+"""
+    build_projection_escort_ring(offsets::AbstractVector{<:AbstractVector}, target_node::Int;
+                                 observers=1:2:length(offsets), ranks=nothing,
+                                 consensus_edges=nothing, D=length(first(offsets))+1)
+        -> EuclideanSheaf{Float64}
+
+Build the same sheaf around an **arbitrary** formation shape rather than a regular polygon.
+
+`offsets[i]` is agent `i`'s nominal displacement from the formation centre, and the list's
+own order is the cyclic order that defines each agent's angle bisector — see
+[`bisector_directions`](@ref)`(offsets)`. Everything else is as in the regular-polygon
+method above, which is implemented by forwarding to this one.
+
+This is what an interactively drawn formation needs: the shape is whatever the user placed,
+so the observation direction at each vertex has to be the real angle bisector rather than
+the radial direction, and the two only coincide when the polygon is regular.
+"""
+function build_projection_escort_ring(offsets::AbstractVector{<:AbstractVector{<:Real}},
+                                      target_node::Int;
+                                      observers=1:2:length(offsets), ranks=nothing,
+                                      consensus_edges=nothing,
+                                      D::Int=length(first(offsets)) + 1)
+    n_agents = length(offsets)
+    @argcheck n_agents >= 1 "need at least one agent"
+    @argcheck D >= 3 "D must be >= 3: at least two translation coordinates plus a homogeneous one (got $D)"
+    @argcheck target_node > n_agents "target_node must be outside 1:n_agents (got $target_node)"
+    @argcheck all(length(d) == D - 1 for d in offsets) "each offset must have D-1 = $(D-1) coordinates"
+
+    trans_dim = D - 1
+    observation_ranks = if ranks === nothing
+        @argcheck all(1 <= o <= n_agents for o in observers) "observers must be within 1:n_agents"
+        [i in observers ? 1 : 0 for i in 1:n_agents]
+    else
+        @argcheck observers == 1:2:n_agents "pass either `observers` or `ranks`, not both"
+        @argcheck length(ranks) == n_agents "ranks must have one entry per agent (got $(length(ranks)) for $n_agents agents)"
+        @argcheck all(r in (0, 1, trans_dim) for r in ranks) "each rank must be 0, 1, or $trans_dim for D = $D (got $ranks)"
+        collect(Int.(ranks))
+    end
+
+    wiring = if consensus_edges === nothing
+        n_agents >= 3 ? [(i, i % n_agents + 1) for i in 1:n_agents] :
+            [(i, i + 1) for i in 1:(n_agents - 1)]
+    else
+        pairs = [(min(Int(a), Int(b)), max(Int(a), Int(b))) for (a, b) in consensus_edges]
+        @argcheck all(1 <= a && b <= n_agents for (a, b) in pairs) "consensus_edges must join agents in 1:n_agents"
+        @argcheck all(a != b for (a, b) in pairs) "consensus_edges must not contain self-loops"
+        @argcheck allunique(pairs) "consensus_edges must not repeat a pair"
+        pairs
+    end
+
+    total_nodes = max(n_agents, target_node)
+    sheaf = EuclideanSheaf{Float64}(fill(D, total_nodes))
+
+    directions = bisector_directions(offsets)
+    frames = [affine_translation_matrix(Float64.(d)) for d in offsets]
+
+    for (i, j) in wiring
+        add_sheaf_edge!(sheaf, i, j, frames[i], frames[j])
+    end
+
+    for i in 1:n_agents
+        observation_ranks[i] == 0 && continue
+        selector = _observation_selector(observation_ranks[i], directions[i], D)
+        add_sheaf_edge!(sheaf, i, target_node, selector * frames[i], selector)
+    end
+
+    return sheaf
+end
 
 end # module

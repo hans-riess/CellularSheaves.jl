@@ -1,0 +1,162 @@
+# Interactive hexagon coordination demo: CellularSheaves.jl backend, browser front end.
+#
+#   julia --project=examples/hexagon_coordination examples/hexagon_coordination/server.jl
+#
+# then open http://localhost:8080. Drive the target with the arrow keys or WASD.
+#
+# The simulation loop lives entirely in Julia -- every frame solves a harmonic
+# extension over the coordination sheaf. The browser only draws what it is sent
+# and forwards keystrokes back, so this really is a CellularSheaves.jl backend
+# rather than a reimplementation in JavaScript.
+#
+# Static files and the WebSocket are served on two adjacent ports (8080 and
+# 8081) rather than multiplexed over one, which keeps both sides on HTTP.jl's
+# simplest, most stable entry points.
+
+using HTTP
+using JSON3
+using Printf
+
+include(joinpath(@__DIR__, "src", "HexagonDemo.jl"))
+using .HexagonDemo
+
+const HTTP_PORT = parse(Int, get(ENV, "HEXAGON_HTTP_PORT", "8080"))
+const WS_PORT = parse(Int, get(ENV, "HEXAGON_WS_PORT", "8081"))
+const FRAME_RATE = 60.0
+const WWW = joinpath(@__DIR__, "www")
+# Image assets live alongside the example rather than inside the document root, so
+# `/static/...` is served from here as a second, equally read-only root.
+const STATIC = joinpath(@__DIR__, "static")
+const TRACKS = joinpath(@__DIR__, "tracks")
+
+const CONTENT_TYPES = Dict(".html" => "text/html; charset=utf-8",
+                           ".css" => "text/css; charset=utf-8",
+                           ".js" => "text/javascript; charset=utf-8",
+                           ".jpg" => "image/jpeg", ".jpeg" => "image/jpeg",
+                           ".png" => "image/png", ".webp" => "image/webp")
+
+function serve_static(request::HTTP.Request)
+    target = HTTP.URI(request.target).path
+    name = (target == "/" || isempty(target)) ? "index.html" : lstrip(target, '/')
+    root, rest = startswith(name, "static/") ? (STATIC, name[8:end]) : (WWW, name)
+    path = normpath(joinpath(root, rest))
+    # Refuse to serve anything that escapes the root it was resolved against.
+    if !startswith(path, root) || !isfile(path)
+        return HTTP.Response(404, "not found")
+    end
+    mime = get(CONTENT_TYPES, lowercase(splitext(path)[2]), "application/octet-stream")
+    return HTTP.Response(200, ["Content-Type" => mime], read(path))
+end
+
+# Keyboard state arrives as {"command": [x, y]} plus discrete actions. Anything
+# unrecognised is ignored rather than fatal: a stray message from a reloading
+# browser should not take the simulation down.
+function handle_message(state::DemoState, raw)
+    message = try
+        JSON3.read(raw)
+    catch
+        return nothing
+    end
+
+    if haskey(message, :command)
+        command = Float64.(collect(message.command))
+        length(command) == 2 && (state.command = command)
+    end
+
+    action = get(message, :action, nothing)
+    if action == "reset"
+        reset!(state)
+    elseif action == "rank"
+        haskey(message, :agent) && cycle_rank!(state, Int(message.agent))
+    elseif action == "ranks"
+        haskey(message, :ranks) && set_ranks!(state, Int.(collect(message.ranks)))
+    elseif action == "ranks_all"
+        toggle_all_ranks!(state)
+    elseif action == "connect"
+        haskey(message, :from) && haskey(message, :to) &&
+            connect_agents!(state, Int(message.from), Int(message.to))
+    elseif action == "disconnect"
+        haskey(message, :from) && haskey(message, :to) &&
+            disconnect_agents!(state, Int(message.from), Int(message.to))
+    elseif action == "reset_edges"
+        reset_edges!(state)
+    elseif action == "add_node"
+        haskey(message, :at) && add_node!(state, Float64.(collect(message.at)))
+    elseif action == "remove_node"
+        haskey(message, :agent) && remove_node!(state, Int(message.agent))
+    elseif action == "clear_nodes"
+        clear_nodes!(state)
+    elseif action == "ghosts"
+        toggle_ghosts!(state)
+    elseif action == "gain"
+        adjust_gain!(state, Float64(get(message, :factor, 1.0)))
+    elseif action == "feedforward"
+        cycle_feedforward!(state)
+    elseif action == "record"
+        toggle_recording!(state)
+    elseif action == "save"
+        try
+            return (event = "saved", path = save_track(state, TRACKS))
+        catch err
+            return (event = "error", message = sprint(showerror, err))
+        end
+    end
+    return nothing
+end
+
+function run_session(ws)
+    state = DemoState()
+    dt = 1 / FRAME_RATE
+    @info "browser connected"
+
+    # Inbound messages are read on their own task so a quiet keyboard never
+    # stalls the simulation, and a busy one never outruns it.
+    reader = Threads.@spawn try
+        for raw in ws
+            reply = handle_message(state, raw)
+            reply === nothing || HTTP.WebSockets.send(ws, JSON3.write(reply))
+        end
+    catch
+        nothing
+    end
+
+    try
+        while !istaskdone(reader)
+            step!(state, dt)
+            HTTP.WebSockets.send(ws, JSON3.write(snapshot(state)))
+            sleep(dt)
+        end
+    catch err
+        err isa HTTP.WebSockets.WebSocketError || @warn "session ended" exception = err
+    end
+    @info "browser disconnected"
+end
+
+function main()
+    isdir(WWW) || error("missing front end directory: $WWW")
+    mkpath(TRACKS)
+
+    static = HTTP.serve!(serve_static, "127.0.0.1", HTTP_PORT)
+    sockets = HTTP.WebSockets.listen!("127.0.0.1", WS_PORT) do ws
+        run_session(ws)
+    end
+
+    @printf("\n  hexagon coordination demo\n")
+    @printf("  open http://localhost:%d  (websocket on :%d)\n", HTTP_PORT, WS_PORT)
+    @printf("  arrows/WASD drive the target, 1-6 cycle observation rank, 0 drops all to rank 0\n")
+    @printf("  [ ] adjust gain, F cycles feedforward, R records, enter saves, space resets\n")
+    @printf("  click empty board to add an agent, shift-click one to remove it, C clears\n")
+    @printf("  ctrl-c to stop\n\n")
+
+    try
+        wait(static)
+    catch err
+        err isa InterruptException || rethrow()
+        @info "shutting down"
+    finally
+        close(static)
+        close(sockets)
+    end
+end
+
+abspath(PROGRAM_FILE) == abspath(@__FILE__) && main()

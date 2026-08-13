@@ -91,7 +91,8 @@ makedocs(
         "generated/control/controlled_mass_spring_damper_chain.md",
         "control/single_integrator_target_tracking.md",
         "generated/control/multi_quadrotor_target_tracking.md",
-        "generated/control/mpc_target_tracking.md"],
+        "generated/control/mpc_target_tracking.md",
+        "generated/control/hexagon_bisector_tracking.md"],
       "Layered Control Architecture Examples" => Any[
         "generated/layered/distributed_harmonic_tracking.md",
         "generated/layered/tikhonov_harmonic_tracking.md",
