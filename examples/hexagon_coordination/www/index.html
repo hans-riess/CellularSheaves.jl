@@ -16,14 +16,13 @@
      than 10% of a design, subordinate to primary and secondary" guidance. */
   :root {
     color-scheme: dark;
-    --bg: #001B31;        /* Navy Blue, deepened for ground */
-    --panel: #003057;     /* Navy Blue */
-    --ink: #FFFFFF;       /* White */
-    --muted: #D6DBD4;     /* Pi Mile */
+    --slate: #16202B;     /* Navy Blue, taken down to a chalkboard */
+    --ink: #F2F0E6;       /* chalk */
+    --muted: #9FA9AE;     /* chalk, rubbed back */
     --heading: #B3A369;   /* Tech Gold */
-    --line: #0E4571;      /* Navy Blue, lifted for borders */
+    --line: #ffffff1f;
     --agent: #B3A369;     /* Tech Gold -- agents and consensus edges */
-    --target: #FFFFFF;    /* White -- the one thing you drive */
+    --target: #FFFFFF;    /* chalk white -- the one thing you drive */
     --bisector: #D6DBD4;  /* Pi Mile -- quiet construction line */
     --observer: #EAAA00;  /* Buzz Gold -- the single reading a rank-1 agent takes */
     --full: #64CCC9;      /* Electric Blue -- a rank-2 agent's full sight line */
@@ -33,53 +32,52 @@
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body {
-    margin: 0; background: var(--bg); color: var(--ink);
+    margin: 0; color: var(--ink);
+    background-color: var(--slate);
+    background-image:
+      url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22600%22%20height%3D%22600%22%3E%3Cfilter%20id%3D%22g%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%220.8%22%20numOctaves%3D%225%22%20seed%3D%2211%22%2F%3E%3CfeColorMatrix%20type%3D%22saturate%22%20values%3D%220%22%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%22600%22%20height%3D%22600%22%20filter%3D%22url%28%23g%29%22%20opacity%3D%220.13%22%2F%3E%3C%2Fsvg%3E"),
+      linear-gradient(101deg, transparent 18%, #ffffff10 26%, transparent 39%),
+      linear-gradient(74deg, transparent 52%, #ffffff0d 61%, transparent 73%),
+      linear-gradient(-83deg, transparent 8%, #ffffff0b 17%, transparent 28%),
+      radial-gradient(58% 40% at 24% 28%, #ffffff14, transparent 72%),
+      radial-gradient(50% 38% at 78% 66%, #ffffff10, transparent 74%),
+      radial-gradient(120% 100% at 50% 45%, transparent 38%, #00000077 100%);
+    background-attachment: fixed;
     font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    display: grid; grid-template-columns: minmax(0, 1fr) 330px;
+    display: grid; grid-template-columns: minmax(0, 1fr) 210px;
     gap: 14px; padding: 14px;
   }
 
   .stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 10px; }
   .masthead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-  h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; white-space: nowrap; }
+  h1 { font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--heading); font-weight: 600; margin: 0; letter-spacing: -0.01em; white-space: nowrap; }
   .lede { margin: 0; color: var(--muted); font-size: 13px; min-width: 0; flex: 1 1 240px; }
 
-  .board {
-    flex: 1; min-height: 0; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
-    display: flex; flex-direction: column;
-  }
+  /* No panel, no border: the canvas draws straight onto the chalkboard. */
+  .board { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .canvaswrap { flex: 1; min-height: 0; }
   canvas { display: block; width: 100%; height: 100%; }
 
   .readout {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
-    gap: 1px; background: var(--line); border-top: 1px solid var(--line); flex: none;
+    display: flex; flex-wrap: wrap; gap: 4px 22px; flex: none;
+    border-top: 1px solid var(--line); padding-top: 8px;
   }
-  /* No `grid-column` spanning here: a cell that spans every track would keep `auto-fit`
-     from collapsing the unused ones, leaving the grid's own background on show. */
-  .cell { background: var(--panel); padding: 7px 11px; }
-  .cell .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
-  .cell .v { font-size: 15px; font-variant-numeric: tabular-nums; margin-top: 1px; }
+  .cell { display: flex; align-items: baseline; gap: 7px; }
+  .cell .k { font-size: 11px; letter-spacing: 0.04em; color: var(--muted); }
+  .cell .v { font-size: 14px; font-variant-numeric: tabular-nums; }
   .cell .v.warn { color: var(--warn); }
 
-  .sidebar { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-  .card h2 { font-size: 12px; margin: 0 0 8px; text-transform: uppercase;
-             letter-spacing: 0.05em; color: var(--heading); font-weight: 600; }
-  .card p { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
-  .card p:last-child { margin-bottom: 0; }
-  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; font-size: 13px; }
-  dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
-       color: var(--observer); white-space: nowrap; }
+  /* Bare minimum: no cards, no rules, no boxes -- just chalk on the board. */
+  .sidebar { display: flex; flex-direction: column; gap: 14px; min-height: 0;
+             overflow-y: auto; padding-top: 2px; }
+  .sidebar h2 { font-size: 11px; margin: 0 0 6px; letter-spacing: 0.09em;
+                text-transform: uppercase; color: var(--heading); font-weight: 600; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; font-size: 12.5px; }
+  dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+       color: var(--ink); white-space: nowrap; opacity: 0.85; }
   dd { margin: 0; color: var(--muted); }
-  .swatch { display: inline-block; width: 20px; height: 3px; vertical-align: middle;
-            margin-right: 7px; border-radius: 2px; }
-  ul.legend { list-style: none; margin: 0; padding: 0; font-size: 13px; }
-  ul.legend li { color: var(--muted); margin-bottom: 5px; }
-  ul.legend li:last-child { margin-bottom: 0; }
-  #status { color: var(--muted); font-size: 12.5px; }
-  #status.bad { color: var(--warn); }
+  #status { color: var(--muted); font-size: 12px; margin-top: auto; padding-top: 8px; opacity: 0.75; }
+  #status.bad { color: var(--warn); opacity: 1; }
 
   @media (max-width: 900px) {
     html, body { height: auto; }
@@ -93,11 +91,6 @@
 <main class="stage">
   <div class="masthead">
     <h1>Hexagon coordination sheaf</h1>
-    <p class="lede">
-      Each agent observes the target at its own <b>rank</b> — nothing, one number along its
-      angle bisector, or the position in full. A harmonic extension fuses whatever readings
-      exist and propagates the answer to the agents that see nothing.
-    </p>
   </div>
 
   <div class="board">
@@ -115,66 +108,30 @@
 </main>
 
 <aside class="sidebar">
-  <div class="card">
-    <h2>Controls</h2>
+  <div>
+    <h2>Keys</h2>
     <dl>
-      <dt>← ↑ ↓ → / WASD</dt><dd>drive the target</dd>
-      <dt>1 … 6</dt><dd>cycle rank: none → line → full</dd>
-      <dt>0</dt><dd>all to rank 0 (again to restore)</dd>
-      <dt>[ ]</dt><dd>agent gain down / up</dd>
-      <dt>F</dt><dd>feedforward 0 → ½ → 1</dd>
-      <dt>G</dt><dd>show / hide the reference q*</dd>
-      <dt>E</dt><dd>restore the ring wiring</dd>
-      <dt>R</dt><dd>record the target path</dd>
-      <dt>enter</dt><dd>save the recording as CSV</dd>
+      <dt>arrows / WASD</dt><dd>drive the target</dd>
+      <dt>1 … 6</dt><dd>rank: none → line → full</dd>
+      <dt>0</dt><dd>all to rank 0</dd>
+      <dt>[ ]</dt><dd>gain</dd>
+      <dt>F</dt><dd>feedforward</dd>
+      <dt>G</dt><dd>reference q*</dd>
+      <dt>E</dt><dd>restore wiring</dd>
+      <dt>R / enter</dt><dd>record / save track</dd>
       <dt>space</dt><dd>reset</dd>
     </dl>
-    <h2 style="margin-top:12px">Mouse</h2>
+  </div>
+
+  <div>
+    <h2>Mouse</h2>
     <dl>
-      <dt>drag</dt><dd>agent to agent, to wire them together</dd>
-      <dt>click</dt><dd>an edge, to cut it</dd>
+      <dt>drag</dt><dd>agent to agent, to wire</dd>
+      <dt>click</dt><dd>an edge, to cut</dd>
     </dl>
   </div>
 
-  <div class="card">
-    <h2>Legend</h2>
-    <ul class="legend">
-      <li><span class="swatch" style="background:var(--agent)"></span>consensus edges — fixed displacements</li>
-      <li><span class="swatch" style="background:var(--bisector)"></span>bisector line — a rank-1 agent</li>
-      <li><span class="swatch" style="background:var(--observer)"></span>what a rank-1 agent sees</li>
-      <li><span class="swatch" style="background:var(--full)"></span>full sight line — a rank-2 agent</li>
-      <li><span class="swatch" style="background:var(--ghost)"></span>harmonic reference q* — hidden, press <b>G</b></li>
-      <li><span class="swatch" style="background:var(--warn)"></span>an undetermined direction</li>
-    </ul>
-  </div>
-
-  <div class="card">
-    <h2>Try this</h2>
-    <p>
-      Put <b>one</b> agent at rank 2 and zero the rest: two scalar readings, formation
-      determined. Now instead put agents <b>1 and 4</b> at rank 1 — also two readings, but a
-      thick bar appears. Those vertices are opposite, so their bisectors are antiparallel and
-      the second reading repeats the first.
-    </p>
-    <p>
-      What determines the formation is not how many numbers you read, but whether the
-      directions you read along <b>span</b>.
-    </p>
-    <p>
-      Press <b>0</b> for no tracking at all: the ring keeps its shape and stops following you.
-    </p>
-    <p>
-      Now cut wiring instead. Click one edge — nothing happens, a path holds the shape just
-      as well as a cycle. Click the edge opposite it and the fleet splits into two halves
-      free to drift apart. Seeing enough and talking to enough of each other are separate
-      questions, and the same readout answers both.
-    </p>
-  </div>
-
-  <div class="card">
-    <h2>Status</h2>
-    <div id="status">connecting…</div>
-  </div>
+  <div id="status">connecting…</div>
 </aside>
 
 <script>
