@@ -56,10 +56,33 @@ agents already hold. "Undetermined" means stay put, not jump somewhere arbitrary
 | `enter` | save the recording as CSV under `tracks/` |
 | `space` | reset |
 
+| `C` | clear the board and start from nothing |
+
 | Mouse | Action |
 |---|---|
+| click empty board | drop a new agent there (up to six) |
 | drag agent → agent | wire the two together with a consensus edge |
 | click an edge | cut it |
+| shift-click an agent | remove it |
+
+## Drawing a formation
+
+The six-agent hexagon is only the starting position. Agents go wherever you click, so the
+formation can be a triangle, a square, or something with no symmetry at all.
+
+That matters mathematically rather than cosmetically. The angle bisector at a vertex is the
+inward *radial* direction only when the polygon is regular; on any other shape the two part
+company, and what an agent observes is the genuine bisector of the angle its two neighbours
+subtend. The cyclic order used for that is the order agents were created in — deliberately
+**not** the consensus wiring, so a vertex has a well-defined bisector even before it has any
+edges. Geometry says what shape is held; topology says who talks to whom; the two stay
+independent.
+
+## The board
+
+The background is `static/img/header.jpeg`, served by `server.jl` from a second read-only
+root at `/static/`. If that file is ever missing the page falls back to a procedural
+chalkboard drawn with an inline SVG filter, so nothing is a hard dependency.
 
 ## Wiring is editable too, and it degrades the same way
 

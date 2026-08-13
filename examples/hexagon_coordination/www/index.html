@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hexagon Coordination Sheaf</title>
+<title>Coordination Sheaf</title>
 <style>
   /* Georgia Tech brand palette (brand.gatech.edu/our-look/colors), one mode only.
      Navy Blue is the ground and Tech Gold is the structure -- the pairing the institute
@@ -29,12 +29,12 @@
     --warn: #E04F39;      /* New Horizon -- undetermined directions, and cutting an edge */
     --ghost: #D6DBD4;     /* Pi Mile */
   }
-  /* Drop a photograph at www/chalkboard.jpg and it takes over as the ground. If the file
-     is absent this layer simply paints nothing and the procedural board below shows
-     through, so the demo has no required asset. */
+  /* The photographed board, served from ../static. If the file is ever missing this layer
+     simply paints nothing and the procedural board below shows through, so the page still
+     works with no asset at all. */
   body::before {
     content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
-    background: url("chalkboard.jpg") center / cover no-repeat;
+    background: url("static/img/header.jpeg") center / cover no-repeat;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -97,13 +97,13 @@
 
 <main class="stage">
   <div class="masthead">
-    <h1>Hexagon coordination sheaf</h1>
+    <h1>Coordination sheaf</h1>
   </div>
 
   <div class="board">
     <div class="canvaswrap"><canvas id="view"></canvas></div>
     <div class="readout">
-      <div class="cell"><div class="k">Ranks 1–6</div><div class="v" id="obs">1·0·1·0·1·0</div></div>
+      <div class="cell"><div class="k">Ranks</div><div class="v" id="obs">1·0·1·0·1·0</div></div>
       <div class="cell"><div class="k">Scalar readings</div><div class="v" id="readings">3</div></div>
       <div class="cell"><div class="k">Undetermined</div><div class="v" id="nullity">0</div></div>
       <div class="cell"><div class="k">Lag</div><div class="v" id="lag">0.00</div></div>

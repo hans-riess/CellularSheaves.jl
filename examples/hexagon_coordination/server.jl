@@ -24,18 +24,24 @@ const HTTP_PORT = parse(Int, get(ENV, "HEXAGON_HTTP_PORT", "8080"))
 const WS_PORT = parse(Int, get(ENV, "HEXAGON_WS_PORT", "8081"))
 const FRAME_RATE = 60.0
 const WWW = joinpath(@__DIR__, "www")
+# Image assets live alongside the example rather than inside the document root, so
+# `/static/...` is served from here as a second, equally read-only root.
+const STATIC = joinpath(@__DIR__, "static")
 const TRACKS = joinpath(@__DIR__, "tracks")
 
 const CONTENT_TYPES = Dict(".html" => "text/html; charset=utf-8",
                            ".css" => "text/css; charset=utf-8",
-                           ".js" => "text/javascript; charset=utf-8")
+                           ".js" => "text/javascript; charset=utf-8",
+                           ".jpg" => "image/jpeg", ".jpeg" => "image/jpeg",
+                           ".png" => "image/png", ".webp" => "image/webp")
 
 function serve_static(request::HTTP.Request)
     target = HTTP.URI(request.target).path
     name = (target == "/" || isempty(target)) ? "index.html" : lstrip(target, '/')
-    path = normpath(joinpath(WWW, name))
-    # Refuse to serve anything that escapes the www directory.
-    if !startswith(path, WWW) || !isfile(path)
+    root, rest = startswith(name, "static/") ? (STATIC, name[8:end]) : (WWW, name)
+    path = normpath(joinpath(root, rest))
+    # Refuse to serve anything that escapes the root it was resolved against.
+    if !startswith(path, root) || !isfile(path)
         return HTTP.Response(404, "not found")
     end
     mime = get(CONTENT_TYPES, lowercase(splitext(path)[2]), "application/octet-stream")
