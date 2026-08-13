@@ -1,4 +1,5 @@
 using Test
+using CellularSheaves
 using CellularSheaves.Formations
 using CellularSheaves: fiber_section_basis
 using Graphs
@@ -106,5 +107,119 @@ using LinearAlgebra
 
     @testset "build_escort_topology — rejects unknown kind" begin
         @test_throws Exception build_escort_topology(:hexagon, 4, 5, 0.3)
+    end
+
+    @testset "bisector_directions" begin
+        u = bisector_directions(6)
+        @test length(u) == 6
+        @test all(v -> length(v) == 2, u)
+        @test all(v -> norm(v) ≈ 1.0, u)
+        # Bisector at vertex 1 (nominal offset along +x) points back toward the centre.
+        @test u[1] ≈ [-1.0, 0.0]
+        # Diametrically opposite vertices have antiparallel bisectors.
+        @test u[1] ≈ -u[4]
+        # Isotropy of the every-other-agent observer set: ∑ uᵢuᵢᵀ = (n/4) I.
+        @test sum(v * v' for v in u[1:2:6]) ≈ 1.5 * I(2)
+        # Radius-independent, and padded into higher translation dimensions.
+        @test bisector_directions(6; trans_dim=3)[3][1:2] ≈ u[3]
+        @test bisector_directions(6; trans_dim=3)[3][3] == 0.0
+        @test_throws Exception bisector_directions(2)
+    end
+
+    @testset "build_projection_escort_ring — structure" begin
+        R = 0.35
+        s = build_projection_escort_ring(6, 7, R)
+        @test s.vertex_stalks == fill(3, 7)
+        # Six ring edges (3-dimensional stalks) + three observation edges (2-dimensional).
+        @test ne(s.underlying_graph) == 9
+        @test sort(collect(values(s.edge_stalks))) == [2, 2, 2, 3, 3, 3, 3, 3, 3]
+        for i in (1, 3, 5)
+            @test s.edge_stalks[UnorderedPair(i, 7)] == 2
+            # The gauge row: it is what propagates h = 1 from the target into the ring.
+            @test s.restriction_maps[i=>7][2, :] == [0.0, 0.0, 1.0]
+            @test s.restriction_maps[7=>i][2, :] == [0.0, 0.0, 1.0]
+        end
+        @test !has_edge(s.underlying_graph, 2, 7)
+        @test !has_edge(s.underlying_graph, 4, 7)
+        @test !has_edge(s.underlying_graph, 6, 7)
+
+        @test_throws Exception build_projection_escort_ring(2, 3, 0.35)
+        @test_throws Exception build_projection_escort_ring(6, 7, 0.0)
+        @test_throws Exception build_projection_escort_ring(6, 7, 0.35; D=2)
+        @test_throws Exception build_projection_escort_ring(6, 7, 0.35; observers=Int[])
+        @test_throws Exception build_projection_escort_ring(6, 7, 0.35; observers=[7])
+        @test_throws Exception build_projection_escort_ring(6, 3, 0.35)
+    end
+
+    @testset "build_projection_escort_ring — the escort formation is a zero-energy section" begin
+        R = 0.35
+        s = build_projection_escort_ring(6, 7, R)
+        d = [R .* [cos(2π * (i - 1) / 6), sin(2π * (i - 1) / 6)] for i in 1:6]
+        δ = coboundary_map(s)
+        for p in ([0.0, 0.0], [0.4, -0.25], [-0.9, 0.6])
+            x = vcat([vcat(p .+ d[i], 1.0) for i in 1:6]..., vcat(p, 1.0))
+            @test norm(δ * x) < 1e-12
+        end
+    end
+
+    @testset "build_projection_escort_ring — three observers determine the formation" begin
+        R = 0.35
+        s = build_projection_escort_ring(6, 7, R)
+        d = [R .* [cos(2π * (i - 1) / 6), sin(2π * (i - 1) / 6)] for i in 1:6]
+        for p in ([0.0, 0.0], [0.4, -0.25], [-0.9, 0.6])
+            x, null_basis = harmonic_extension(s, Dict(7 => vcat(p, 1.0)))
+            @test size(null_basis, 2) == 0
+            xv = Vector(x)
+            for i in 1:6
+                # Agents 2, 4 and 6 touch no observation edge; reaching their correct
+                # position is the harmonic extension propagating the fused estimate.
+                @test xv[3(i-1)+1:3(i-1)+2] ≈ p .+ d[i] atol=1e-10
+                @test xv[3i] ≈ 1.0 atol=1e-10
+            end
+        end
+    end
+
+    @testset "build_projection_escort_ring — a single observer leaves one direction undetermined" begin
+        R = 0.35
+        p = [0.4, -0.25]
+        s = build_projection_escort_ring(6, 7, R; observers=[3])
+        d = [R .* [cos(2π * (i - 1) / 6), sin(2π * (i - 1) / 6)] for i in 1:6]
+        x, null_basis = harmonic_extension(s, Dict(7 => vcat(p, 1.0)))
+
+        @test size(null_basis, 2) == 1
+        # `null_basis` spans the full cochain space and is zero on the pinned target
+        # block; the agent degrees of freedom are the leading 18 entries.
+        @test norm(null_basis[19:21, 1]) < 1e-12
+        w = null_basis[1:18, 1]
+        # The undetermined direction is a *uniform* translation of the whole ring,
+        # orthogonal to agent 3's bisector, with no dilation component.
+        u3 = bisector_directions(6)[3]
+        head = w[1:2]
+        for i in 1:6
+            @test w[3(i-1)+1:3(i-1)+2] ≈ head atol=1e-10
+            @test abs(w[3i]) < 1e-10
+        end
+        @test abs(dot(normalize(head), u3)) < 1e-10
+
+        # `harmonic_extension` returns *a* representative of the solution set, not the
+        # minimum-norm one, so test membership rather than the specific vector: the exact
+        # escort formation differs from `x` by a multiple of the null direction.
+        exact = vcat([vcat(p .+ d[i], 1.0) for i in 1:6]...)
+        residual = exact - Vector(x)[1:18]
+        @test norm(residual - w * (dot(w, residual) / dot(w, w))) < 1e-9
+    end
+
+    @testset "build_projection_escort_ring — opposite observers are rank-deficient too" begin
+        R = 0.35
+        boundary = Dict(7 => [0.4, -0.25, 1.0])
+        # Agents 1 and 4 sit diametrically opposite, so their bisectors are antiparallel
+        # and two observers buy no more than one.
+        _, opposite = harmonic_extension(build_projection_escort_ring(6, 7, R; observers=[1, 4]), boundary)
+        @test size(opposite, 2) == 1
+        # Any two non-opposite observers do determine the formation.
+        for obs in ([1, 3], [3, 5], [1, 2])
+            _, nb = harmonic_extension(build_projection_escort_ring(6, 7, R; observers=obs), boundary)
+            @test size(nb, 2) == 0
+        end
     end
 end

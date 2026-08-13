@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hexagon Coordination Sheaf</title>
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --panel: #ffffff;
+    --ink: #1c1c1c;
+    --muted: #6b6b6b;
+    --line: #d8d5cf;
+    --agent: #2a6fb5;
+    --observer: #c8442c;
+    --bisector: #3d9970;
+    --ghost: #a8a8a8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c; --panel: #1e2126; --ink: #e8e6e3; --muted: #9a9a9a;
+      --line: #343941; --agent: #62a8e8; --observer: #f0765c;
+      --bisector: #63c295; --ghost: #6e7681;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; align-items: center; padding: 20px 16px 40px;
+  }
+  h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; letter-spacing: -0.01em; }
+  p.lede { margin: 0 0 18px; color: var(--muted); max-width: 62ch; text-align: center; }
+  .stage {
+    width: 100%; max-width: 940px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  }
+  canvas { display: block; width: 100%; height: auto; }
+  .readout {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px; background: var(--line); border-top: 1px solid var(--line);
+  }
+  .cell { background: var(--panel); padding: 9px 12px; }
+  .cell .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .cell .v { font-size: 15px; font-variant-numeric: tabular-nums; margin-top: 1px; }
+  .cell .v.warn { color: var(--observer); }
+  .panels { display: flex; flex-wrap: wrap; gap: 14px; max-width: 940px; width: 100%; margin-top: 18px; }
+  .card {
+    flex: 1 1 280px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 13px 15px;
+  }
+  .card h2 { font-size: 13px; margin: 0 0 8px; text-transform: uppercase;
+             letter-spacing: 0.05em; color: var(--muted); font-weight: 600; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
+  dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--observer); white-space: nowrap; }
+  dd { margin: 0; color: var(--muted); }
+  .swatch { display: inline-block; width: 22px; height: 3px; vertical-align: middle; margin-right: 7px; border-radius: 2px; }
+  ul.legend { list-style: none; margin: 0; padding: 0; }
+  ul.legend li { color: var(--muted); margin-bottom: 5px; }
+  #status { margin-top: 14px; color: var(--muted); font-size: 13px; min-height: 20px; }
+  #status.bad { color: var(--observer); }
+</style>
+</head>
+<body>
+
+<h1>Hexagon coordination sheaf</h1>
+<p class="lede">
+  Agents 1, 3 and 5 each measure a single number: the projection of the target onto the angle
+  bisector at their own vertex. Agents 2, 4 and 6 measure nothing. A harmonic extension fuses
+  the readings and propagates them around the ring.
+</p>
+
+<div class="stage">
+  <canvas id="view" width="1880" height="1175"></canvas>
+  <div class="readout">
+    <div class="cell"><div class="k">Observers</div><div class="v" id="obs">1, 3, 5</div></div>
+    <div class="cell"><div class="k">Scalar readings</div><div class="v" id="readings">3</div></div>
+    <div class="cell"><div class="k">Undetermined directions</div><div class="v" id="nullity">0</div></div>
+    <div class="cell"><div class="k">Sheaf energy</div><div class="v" id="energy">0</div></div>
+    <div class="cell"><div class="k">Recording</div><div class="v" id="rec">off</div></div>
+  </div>
+</div>
+
+<div class="panels">
+  <div class="card">
+    <h2>Controls</h2>
+    <dl>
+      <dt>← ↑ ↓ → / WASD</dt><dd>drive the target</dd>
+      <dt>1 … 6</dt><dd>toggle an agent's observation</dd>
+      <dt>R</dt><dd>start / stop recording the target path</dd>
+      <dt>enter</dt><dd>save the recording as CSV</dd>
+      <dt>space</dt><dd>reset</dd>
+    </dl>
+  </div>
+  <div class="card">
+    <h2>Legend</h2>
+    <ul class="legend">
+      <li><span class="swatch" style="background:var(--agent)"></span>ring edges — fixed displacements</li>
+      <li><span class="swatch" style="background:var(--bisector)"></span>bisector line of an observer</li>
+      <li><span class="swatch" style="background:var(--observer)"></span>the projection each observer sees</li>
+      <li><span class="swatch" style="background:var(--ghost)"></span>harmonic reference q*</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h2>Try this</h2>
+    <p style="margin:0;color:var(--muted)">
+      Press <b>3</b> and <b>5</b> to leave a single observer. The ring drifts along a thick bar —
+      the direction one scalar reading cannot pin — yet the sheaf energy stays at zero. That
+      configuration is a perfectly valid solution; it just isn't the only one.
+    </p>
+  </div>
+</div>
+
+<div id="status">connecting…</div>
+
+<script>
+"use strict";
+
+const canvas = document.getElementById("view");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const out = {
+  obs: document.getElementById("obs"),
+  readings: document.getElementById("readings"),
+  nullity: document.getElementById("nullity"),
+  energy: document.getElementById("energy"),
+  rec: document.getElementById("rec"),
+};
+
+const css = getComputedStyle(document.documentElement);
+const color = (name) => css.getPropertyValue(name).trim();
+
+let frame = null;
+let observers = [1, 2, 3, 4, 5, 6].filter((i) => i % 2 === 1);
+let trail = [];
+const held = new Set();
+
+const AXIS_KEYS = {
+  ArrowLeft: [-1, 0], KeyA: [-1, 0],
+  ArrowRight: [1, 0], KeyD: [1, 0],
+  ArrowUp: [0, 1], KeyW: [0, 1],
+  ArrowDown: [0, -1], KeyS: [0, -1],
+};
+
+// The backend serves static files and the WebSocket on adjacent ports.
+const host = location.hostname || "localhost";
+const wsPort = Number(location.port || 8080) + 1;
+const socket = new WebSocket(`ws://${host}:${wsPort}`);
+
+socket.addEventListener("open", () => {
+  statusEl.textContent = "connected — click the canvas and drive the target";
+  statusEl.classList.remove("bad");
+});
+socket.addEventListener("close", () => {
+  statusEl.textContent = "disconnected — restart server.jl and reload";
+  statusEl.classList.add("bad");
+});
+socket.addEventListener("message", (event) => {
+  const message = JSON.parse(event.data);
+  if (message.event === "saved") {
+    statusEl.textContent = `saved ${message.path}`;
+    return;
+  }
+  if (message.event === "error") {
+    statusEl.textContent = message.message;
+    return;
+  }
+  frame = message;
+  observers = message.observers;
+  trail.push(message.target);
+  if (trail.length > 420) trail.shift();
+  render(message);
+});
+
+function sendCommand() {
+  if (socket.readyState !== WebSocket.OPEN) return;
+  let x = 0, y = 0;
+  for (const code of held) {
+    const axis = AXIS_KEYS[code];
+    if (axis) { x += axis[0]; y += axis[1]; }
+  }
+  const norm = Math.hypot(x, y) || 1;
+  socket.send(JSON.stringify({ command: [x / norm, y / norm] }));
+}
+
+function send(payload) {
+  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload));
+}
+
+window.addEventListener("keydown", (event) => {
+  if (AXIS_KEYS[event.code]) {
+    event.preventDefault();
+    if (!held.has(event.code)) { held.add(event.code); sendCommand(); }
+    return;
+  }
+  if (event.code === "Space") { event.preventDefault(); trail = []; send({ action: "reset" }); return; }
+  if (event.code === "KeyR") { send({ action: "record" }); return; }
+  // Not "S": that is already WASD's down key.
+  if (event.code === "Enter") { send({ action: "save" }); return; }
+
+  const digit = /^Digit([1-6])$/.exec(event.code);
+  if (digit) {
+    const agent = Number(digit[1]);
+    const next = observers.includes(agent)
+      ? observers.filter((i) => i !== agent)
+      : [...observers, agent].sort((a, b) => a - b);
+    // The backend ignores an empty observer set; mirror that here so the UI
+    // never shows a selection the simulation did not accept.
+    if (next.length > 0) send({ action: "observers", observers: next });
+  }
+});
+
+window.addEventListener("keyup", (event) => {
+  if (held.delete(event.code)) sendCommand();
+});
+window.addEventListener("blur", () => { held.clear(); sendCommand(); });
+
+// World units -> canvas pixels. The arena is centred on the origin.
+function makeTransform(arena) {
+  const scale = Math.min(canvas.width / arena[0], canvas.height / arena[1]);
+  return (p) => [canvas.width / 2 + p[0] * scale, canvas.height / 2 - p[1] * scale];
+}
+
+function line(a, b, stroke, width, dash = []) {
+  ctx.save();
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = width;
+  ctx.setLineDash(dash);
+  ctx.beginPath();
+  ctx.moveTo(a[0], a[1]);
+  ctx.lineTo(b[0], b[1]);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function disc(p, radius, fill, stroke = null, width = 2) {
+  ctx.beginPath();
+  ctx.arc(p[0], p[1], radius, 0, 2 * Math.PI);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.stroke(); }
+}
+
+function render(state) {
+  const toPixels = makeTransform(state.arena);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Undetermined directions, drawn first so everything else sits on top.
+  const centre = state.reference.reduce((acc, p) => [acc[0] + p[0] / 6, acc[1] + p[1] / 6], [0, 0]);
+  if (state.null_directions.length > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    for (const direction of state.null_directions) {
+      const len = Math.hypot(direction[0], direction[1]) || 1;
+      const unit = [direction[0] / len, direction[1] / len];
+      const reach = 0.42 * state.arena[0];
+      line(toPixels([centre[0] - unit[0] * reach, centre[1] - unit[1] * reach]),
+           toPixels([centre[0] + unit[0] * reach, centre[1] + unit[1] * reach]),
+           color("--observer"), 18, []);
+    }
+    ctx.restore();
+  }
+
+  // Bisector lines of the observing agents.
+  state.observers.forEach((agent, k) => {
+    const u = state.directions[k];
+    const anchor = state.agents[agent - 1];
+    const reach = 1.4 * state.arena[0];
+    line(toPixels([anchor[0] - u[0] * reach, anchor[1] - u[1] * reach]),
+         toPixels([anchor[0] + u[0] * reach, anchor[1] + u[1] * reach]),
+         color("--bisector"), 2.5, [12, 10]);
+  });
+
+  // Target trail.
+  if (trail.length > 1) {
+    ctx.save();
+    ctx.strokeStyle = color("--ink");
+    ctx.globalAlpha = 0.22;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    trail.forEach((p, i) => {
+      const q = toPixels(p);
+      i === 0 ? ctx.moveTo(q[0], q[1]) : ctx.lineTo(q[0], q[1]);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Ring edges: the fixed-displacement constraints.
+  for (let i = 0; i < state.agents.length; i++) {
+    const j = (i + 1) % state.agents.length;
+    line(toPixels(state.agents[i]), toPixels(state.agents[j]), color("--agent"), 4);
+  }
+
+  // Harmonic reference, as hollow ghosts.
+  ctx.save();
+  ctx.globalAlpha = 0.75;
+  for (const p of state.reference) disc(toPixels(p), 17, null, color("--ghost"), 3);
+  ctx.restore();
+
+  // What each observer actually measures: the target's foot on its bisector.
+  state.projections.forEach((foot) => {
+    line(toPixels(state.target), toPixels(foot), color("--observer"), 2.5, [7, 7]);
+    disc(toPixels(foot), 8, color("--observer"));
+  });
+
+  // Agents. Observers are ringed in the observer colour.
+  state.agents.forEach((p, i) => {
+    const observing = state.observers.includes(i + 1);
+    disc(toPixels(p), 20, color("--agent"), observing ? color("--observer") : null, 6);
+    const q = toPixels(p);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "600 22px ui-sans-serif, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(i + 1), q[0], q[1] + 1);
+  });
+
+  // Target.
+  const target = toPixels(state.target);
+  ctx.save();
+  ctx.fillStyle = color("--ink");
+  ctx.beginPath();
+  for (let k = 0; k < 10; k++) {
+    const radius = k % 2 === 0 ? 22 : 9;
+    const angle = (Math.PI / 5) * k - Math.PI / 2;
+    const point = [target[0] + radius * Math.cos(angle), target[1] + radius * Math.sin(angle)];
+    k === 0 ? ctx.moveTo(point[0], point[1]) : ctx.lineTo(point[0], point[1]);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  out.obs.textContent = state.observers.join(", ");
+  out.readings.textContent = String(state.observers.length);
+  out.nullity.textContent = String(state.null_directions.length);
+  out.nullity.className = state.null_directions.length > 0 ? "v warn" : "v";
+  out.energy.textContent = Number(state.energy).toExponential(2);
+  out.rec.textContent = state.recording ? `on — ${state.samples} samples` : "off";
+}
+</script>
+</body>
+</html>
